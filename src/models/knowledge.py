@@ -33,6 +33,7 @@ class ChunkingStrategy(str, Enum):
     PARAGRAPH = "paragraph"
     SEMANTIC = "semantic"
     CODE_AWARE = "code_aware"
+    MARKDOWN_AWARE = "markdown_aware"
 
 
 class IngestConfig(BaseModel):

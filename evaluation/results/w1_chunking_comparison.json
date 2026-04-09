@@ -1,0 +1,53 @@
+{
+  "evaluation": "w1_chunking_comparison",
+  "timestamp": "2026-04-09T13:59:41Z",
+  "corpus_size": 3,
+  "query_count": 6,
+  "chunk_size": 512,
+  "results": {
+    "fixed_size": {
+      "strategy": "fixed_size",
+      "total_chunks": 16,
+      "avg_chunk_size": 452,
+      "min_chunk_size": 16,
+      "max_chunk_size": 512,
+      "sections_with_heading": 15,
+      "code_blocks_intact": 3,
+      "total_code_blocks": 5,
+      "source_accuracy": "3/6",
+      "section_relevance": "1/6",
+      "avg_search_score": 0.6444,
+      "search_scores": [
+        0.875,
+        0.6,
+        0.6667,
+        0.6,
+        0.5,
+        0.625
+      ],
+      "elapsed_ms": 1
+    },
+    "markdown_aware": {
+      "strategy": "markdown_aware",
+      "total_chunks": 27,
+      "avg_chunk_size": 237,
+      "min_chunk_size": 18,
+      "max_chunk_size": 483,
+      "sections_with_heading": 26,
+      "code_blocks_intact": 5,
+      "total_code_blocks": 5,
+      "source_accuracy": "3/6",
+      "section_relevance": "2/6",
+      "avg_search_score": 0.6444,
+      "search_scores": [
+        0.875,
+        0.6,
+        0.6667,
+        0.6,
+        0.5,
+        0.625
+      ],
+      "elapsed_ms": 1
+    }
+  }
+}
