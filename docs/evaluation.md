@@ -113,35 +113,36 @@ Synthetic corpus with markdown-structured documents (headings, sections). Demons
 
 **Status:** Complete. Strong directional signal that markdown-aware improves retrieval on structured docs.
 
-### Evidence 3: Real pilot-scope gate (w1_real_pilot.json, 10 queries, joblogic-kb/api-docs)
+### Evidence 3: Real pilot-scope provisional run (w1_real_pilot.json, 10 queries, joblogic-kb/api-docs)
 
-Real production documents from `ai-agentopia/docs` repo (9 of 10 source documents loaded, 1 not found locally). 10 labeled queries with source-level relevance grading.
-
-**Gate result: FAILED** — nDCG@5 regressed beyond tolerance.
+Real production documents from `ai-agentopia/docs` repo. **Provisional evidence only** — not an authoritative gate decision. See limitations below.
 
 | Metric | FIXED_SIZE (244 chunks) | MARKDOWN_AWARE (371 chunks) | Delta |
 |---|---|---|---|
-| nDCG@5 | 0.7440 | 0.6309 | **-0.1131** |
+| nDCG@5 | 0.7440 | 0.6309 | -0.1131 |
 | MRR | 0.7500 | 0.6333 | -0.1167 |
-| P@5 | 0.4000 | 0.3600 | -0.0400 |
-| R@5 | 1.8000 | 1.6000 | -0.2000 |
 
-**Root cause:** Markdown-aware chunking produces 52% more chunks (371 vs 244) from the same documents. With in-memory cosine similarity, the larger chunk set dilutes retrieval scores — smaller chunks have less text overlap with queries, causing ranking degradation on some queries.
+**Directional signal:** nDCG@5 and MRR both show regression. This is a negative directional signal for W1 on this corpus, but is NOT an authoritative gate decision.
 
-**Key finding:** The chunk-count increase from heading-boundary splitting is a trade-off. Markdown-aware improves precision when queries target specific sections (e.g., "How does the governed PR review work?" → correct heading section ranked higher) but degrades when the search model cannot distinguish many small chunks effectively.
+**Limitations of this evidence:**
+1. **DRAFT labels:** Dataset labels created from document heading analysis, not CTO-reviewed. Authoritative gate requires label review.
+2. **Partial corpus:** 9 of 10 source documents loaded (1 not found locally: `ui-knowledge-workflow-trigger.md`). Not a fully faithful scope replay.
+3. **Invalid Recall@5:** Source-level grading produces Recall@5 > 1.0 (denominator is source count, numerator is chunk count). Recall values in this run are not meaningful. nDCG@5, MRR, and Precision@5 are valid.
+4. **In-memory search only:** Comparison uses in-memory cosine similarity, not the production Qdrant retrieval path. Embedding-based search may rank differently.
+
+**Observation:** Markdown-aware produces 52% more chunks (371 vs 244) from the same documents. With in-memory cosine similarity, more smaller chunks appear to dilute scoring. Whether this holds with embedding-based Qdrant search is unknown.
 
 **Script:** `evaluation/w1_real_pilot_gate.py`
 **Results:** `evaluation/results/w1_real_pilot_gate.json`
-**Dataset labels:** DRAFT — requires CTO review before use as authoritative gate evidence.
 
 ### Current W1 status
 
 - Implementation: complete, merged, opt-in only
 - Regression check on seed scope: complete, no regression
 - Synthetic benchmark: complete, positive signal (nDCG@5 +0.4095)
-- Real pilot-scope gate: **FAILED** (nDCG@5 -0.1131)
+- Real pilot-scope run: provisional negative signal (nDCG@5 -0.1131), NOT authoritative
+- **Authoritative gate decision: pending** — requires label review, full corpus, and ideally embedding-based evaluation
 - W1 remains opt-in. NOT promoted for production use.
-- Next steps: investigate chunk-count trade-off, consider minimum chunk merging or embedding-based search evaluation
 
 ---
 
