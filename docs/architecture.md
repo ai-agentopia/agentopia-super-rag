@@ -18,11 +18,11 @@ It does not make workflow decisions, does not call LLMs for reasoning, and does 
 /api/v1/knowledge/{scope}/reindex               POST   — re-embed all docs in scope
 /api/v1/knowledge/{scope}/documents             GET    — list documents in scope
 /api/v1/knowledge/{scope}/documents/{source}    DELETE — remove specific document by source path
-/internal/health                                GET    — deep health: Qdrant + binding cache
+/internal/health                                GET    — internal health: Qdrant + binding cache + proxy config
 /internal/binding-sync                          POST   — webhook: bot-config-api pushes binding updates
 /internal/binding-sync/{bot_name}               GET    — query single bot binding state
 /internal/binding-sync/{bot_name}               DELETE — webhook: bot deleted
-/health                                         GET    — shallow health: Postgres + Redis
+/health                                         GET    — liveness probe (no dependency checks)
 ```
 
 **Search scoping note:** `/api/v1/knowledge/search` resolves scope access server-side. Bot callers (bearer token) get scopes from the binding cache. Operator callers (internal token) pass `?scopes=` query parameters explicitly. There is no per-scope search path — scope isolation is enforced inside the handler, not by the URL.
@@ -39,7 +39,7 @@ It does not make workflow decisions, does not call LLMs for reasoning, and does 
 
 ### agentopia-protocol (gateway pods)
 
-- **Bot runtime path:** Gateway pods call `/api/v1/knowledge/{scope}/search` with a per-bot bearer token. Auth is verified against the K8s Secret `agentopia-gateway-env-{bot_name}`. Scope resolution is server-side (the service looks up which scopes the bot is subscribed to, not the bot).
+- **Bot runtime path:** Gateway pods call `GET /api/v1/knowledge/search` with a per-bot bearer token (`Authorization: Bearer {token}` + `X-Bot-Name: {name}`). There is no per-scope search URL — the bot does not specify a scope in the path. Scope resolution is server-side: the service looks up which scopes the bot is subscribed to via the binding cache, and searches only those scopes. Auth is verified against the K8s Secret `agentopia-gateway-env-{bot_name}`.
 
 ### agentopia-infra
 
@@ -63,7 +63,7 @@ It does not make workflow decisions, does not call LLMs for reasoning, and does 
 
 ### Scope identity
 
-A scope is identified by `{client_id}/{scope_name}` (e.g., `acme-corp/api-docs`). This canonical path is SHA-256 hashed to produce the Qdrant collection name. The hash prevents cross-tenant namespace collisions even if client IDs share prefixes.
+A scope is identified by `{client_id}/{scope_name}` (e.g., `acme-corp/api-docs`). This canonical path is SHA-256 hashed (truncated to 16 hex chars) to produce the Qdrant collection name: `kb-{sha256_hex[:16]}`. The hash prevents cross-tenant namespace collisions and avoids Qdrant's restriction on `/` in collection names. The canonical form with `/` is preserved in all API responses, logs, and metadata — only Qdrant sees the physical hashed name.
 
 ### Binding cache
 
@@ -88,9 +88,9 @@ document input (PDF / HTML / Markdown / code)
     │             Strategy is per-ingest configurable. Default: fixed-size.
     │
     ├── embed     (POST to EMBEDDING_API_URL, model: text-embedding-3-small, 1536d)
-    │             Circuit breaker: 5 failures → open for 30s
+    │             Circuit breaker: 5 consecutive failures → open for 300s (5 min)
     │
-    ├── upsert    → Qdrant collection (scope SHA-256 name)
+    ├── upsert    → Qdrant collection (kb-{sha256_hex[:16]} of scope identity)
     │
     └── record    → PostgreSQL document_store (active state, source hash, version)
 ```
@@ -111,7 +111,7 @@ query string
     └── return    SearchResult[] with citations
 ```
 
-**Dimension validation:** On startup, if the collection already exists, the service validates that the stored vector dimension matches the configured model's dimension. A mismatch is a hard error — it prevents silent quality degradation after a model change.
+**Dimension validation:** On startup, the service checks all existing `kb-*` Qdrant collections against the configured embedding dimension. A mismatch logs a `DIMENSION_MISMATCH` warning — it is **not** a hard startup error. The service continues to run, but search results on the mismatched collection will be degraded or incorrect. Operator action required: `POST /api/v1/knowledge/{scope}/reindex` to rebuild the collection with the correct dimension.
 
 ---
 
