@@ -2,6 +2,9 @@ name: Build Image
 
 # CUTOVER STEP 1 — agentopia-super-rag#24
 #
+# agentopia-super-rag is a main-only repo. No dev/uat branches.
+# Images are published on push to main.
+#
 # This is the Phase 3 atomic cutover Step 1 workflow.
 # It pushes dev-{sha} tags to ghcr.io/ai-agentopia/knowledge-api from this repo.
 #
@@ -11,16 +14,16 @@ name: Build Image
 #   3. GHCR old tags from agentopia-protocol confirmed retained (rollback depends on them)
 #
 # Post-merge sequence (must follow in order):
-#   Step 1 (this PR): push trigger live — produces first dev-{sha} from this repo
+#   Step 1 (this PR): push trigger live — first push to main produces dev-{sha}
 #   Step 2: verify first push in GHCR before proceeding
 #   Step 3: disable old publisher (agentopia-protocol#389) in same deploy window
 #   Step 4: verify ArgoCD rollout + /health 200
 
 on:
   push:
-    branches: [dev]
+    branches: [main]
   pull_request:
-    branches: [main, dev]
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -40,7 +43,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
-        if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
@@ -51,7 +54,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ghcr.io/ai-agentopia/knowledge-api:dev-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
