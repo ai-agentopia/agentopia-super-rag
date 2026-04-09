@@ -1,14 +1,14 @@
 {
   "evaluation": "w1_real_pilot_gate",
-  "timestamp": "2026-04-09T15:15:28Z",
+  "timestamp": "2026-04-09T23:41:29Z",
   "pilot_scope": "joblogic-kb/api-docs",
   "dataset": "w1_real_pilot.json",
   "dataset_queries": 10,
   "documents_loaded": 9,
   "label_status": "REVIEWED \u2014 labels verified against document heading structure. Each query-source mapping confirmed by checking the document's heading/section that answers the query. Awaiting CTO sign-off for authoritative status.",
   "gate_criteria": "nDCG@5 regression <= 0.01",
-  "gate_passed": false,
-  "gate_reason": "nDCG@5 regressed 0.1108 \u2014 exceeds tolerance (0.01)",
+  "gate_passed": true,
+  "gate_reason": "nDCG@5 improved by +0.0477 (no regression)",
   "baseline": {
     "strategy": "fixed_size",
     "total_chunks": 244,
@@ -127,22 +127,22 @@
   },
   "candidate": {
     "strategy": "markdown_aware",
-    "total_chunks": 371,
+    "total_chunks": 348,
     "aggregates": {
       "ndcg": {
-        "mean": 0.6332,
+        "mean": 0.7917,
         "min": 0.0,
         "max": 1.0,
         "count": 10
       },
       "mrr": {
-        "mean": 0.6333,
+        "mean": 0.7667,
         "min": 0.0,
         "max": 1.0,
         "count": 10
       },
       "precision": {
-        "mean": 0.38,
+        "mean": 0.44,
         "min": 0.0,
         "max": 1.0,
         "count": 10
@@ -180,7 +180,7 @@
         "id": "rp-04",
         "scenario": "process_explanation",
         "metrics": {
-          "ndcg": 1.0,
+          "ndcg": 0.9197,
           "mrr": 1.0,
           "precision": 0.4
         }
@@ -189,9 +189,9 @@
         "id": "rp-05",
         "scenario": "architecture_design",
         "metrics": {
-          "ndcg": 0.0,
-          "mrr": 0.0,
-          "precision": 0.0
+          "ndcg": 0.5,
+          "mrr": 0.3333,
+          "precision": 0.2
         }
       },
       {
@@ -207,18 +207,18 @@
         "id": "rp-07",
         "scenario": "runtime_architecture",
         "metrics": {
-          "ndcg": 0.5,
+          "ndcg": 0.5706,
           "mrr": 0.3333,
-          "precision": 0.2
+          "precision": 0.4
         }
       },
       {
         "id": "rp-08",
         "scenario": "requirements_recall",
         "metrics": {
-          "ndcg": 0.0,
-          "mrr": 0.0,
-          "precision": 0.0
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.2
         }
       },
       {
@@ -234,7 +234,7 @@
         "id": "rp-10",
         "scenario": "security_architecture",
         "metrics": {
-          "ndcg": 0.8529,
+          "ndcg": 0.9469,
           "mrr": 1.0,
           "precision": 0.6
         }
@@ -243,8 +243,8 @@
   },
   "metric_model": "nDCG@5 and MRR authoritative. P@5 directional. Recall@5 excluded (invalid with source-level grading).",
   "deltas": {
-    "nDCG@5": -0.1108,
-    "MRR": -0.1167,
-    "P@5": -0.04
+    "nDCG@5": 0.0477,
+    "MRR": 0.0167,
+    "P@5": 0.02
   }
 }

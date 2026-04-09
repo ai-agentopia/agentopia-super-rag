@@ -230,13 +230,24 @@ def _chunk_markdown_aware(content: str, max_size: int) -> list[str]:
     if not blocks or not has_markdown:
         return _chunk_fixed_size(content, max_size, max_size // 8)
 
-    # Phase 2: Merge adjacent blocks respecting boundary strength.
-    # heading_section → strong boundary: always starts a new chunk
-    # code_fence/paragraph → weak boundary: merge into current chunk if fits
+    # Phase 2: Filter and merge blocks.
+    # - Drop horizontal-rule-only blocks ("---") — visual separators, not content.
+    # - heading_section → strong boundary: always starts a new chunk.
+    #   But heading always absorbs following weak-boundary blocks (paragraph,
+    #   code_fence) until max_size — heading is never emitted alone if content follows.
+    # - code_fence/paragraph → weak boundary: merge into current chunk if fits.
+
+    # Filter out horizontal rules
+    blocks = [(bt, txt) for bt, txt in blocks if txt.strip() not in ("---", "----", "-----")]
+
     chunks: list[str] = []
     current = ""
+    # Track whether the current accumulator starts with a heading.
+    # If it does and the next block doesn't fit, the heading must stay
+    # attached to the first part of the next block — never emitted alone.
+    current_is_heading_only = False
 
-    for block_type, block_text in blocks:
+    for i, (block_type, block_text) in enumerate(blocks):
         block_text = block_text.strip()
         if not block_text:
             continue
@@ -245,13 +256,33 @@ def _chunk_markdown_aware(content: str, max_size: int) -> list[str]:
         if block_type == "heading_section":
             if current:
                 chunks.append(current)
-            # If the heading section itself exceeds max_size, split it
             if len(block_text) > max_size:
                 sub_chunks = _split_oversized_block(block_text, max_size)
                 chunks.extend(sub_chunks[:-1])
                 current = sub_chunks[-1] if sub_chunks else ""
+                current_is_heading_only = False
             else:
                 current = block_text
+                # A heading_section that is ONLY the heading line (no body
+                # content after it) must absorb the next block to avoid
+                # emitting a tiny standalone heading chunk.
+                current_is_heading_only = "\n" not in block_text.strip()
+            continue
+
+        # If current is a heading-only stub, force-attach this block as
+        # its body content — even if it exceeds max_size. Split the
+        # combined text if needed, but never leave the heading alone.
+        if current_is_heading_only:
+            combined = f"{current}\n\n{block_text}"
+            if len(combined) <= max_size:
+                current = combined
+            else:
+                # Heading + content exceeds max_size. Split the content
+                # but keep the heading attached to the first sub-chunk.
+                sub_chunks = _split_oversized_block(combined, max_size)
+                chunks.extend(sub_chunks[:-1])
+                current = sub_chunks[-1] if sub_chunks else ""
+            current_is_heading_only = False
             continue
 
         # If the block itself exceeds max_size, split it
@@ -261,6 +292,7 @@ def _chunk_markdown_aware(content: str, max_size: int) -> list[str]:
                 current = ""
             sub_chunks = _split_oversized_block(block_text, max_size)
             chunks.extend(sub_chunks)
+            current_is_heading_only = False
             continue
 
         # Try to merge with current accumulator
