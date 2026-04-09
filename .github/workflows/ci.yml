@@ -1,0 +1,49 @@
+name: CI — Fast Gate
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+    branches: [main, dev]
+
+# Fast validation lane — no external dependencies, no production artifacts.
+#
+# Phase 1: validates repo structure and dependency spec only.
+#           Test suite will be populated in Phase 2 (code extraction).
+# Phase 2: pytest -m "not integration and not e2e" -x -q will find real tests.
+# Phase 3+: integration tests run locally; e2e tests run against live cluster.
+
+jobs:
+  fast-gate:
+    name: Fast Gate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install --no-cache-dir -r requirements.txt
+
+      - name: Validate Python version
+        run: python -c "import sys; assert sys.version_info >= (3, 12), f'Expected Python 3.12+, got {sys.version}'"
+
+      - name: Run fast test gate
+        run: |
+          # Exit codes: 0 = all passed, 5 = no tests collected (OK in Phase 1).
+          # Any other exit code (1=failures, 2=interrupted, 3=internal error, 4=usage) is a failure.
+          pytest tests/ -m "not integration and not e2e" -x -q --tb=short
+          rc=$?
+          if [ $rc -eq 0 ] || [ $rc -eq 5 ]; then
+            echo "Fast gate passed (rc=$rc). Test count will grow after Phase 2 extraction."
+            exit 0
+          else
+            echo "Fast gate FAILED (rc=$rc)."
+            exit $rc
+          fi
