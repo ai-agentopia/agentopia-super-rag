@@ -113,21 +113,35 @@ Synthetic corpus with markdown-structured documents (headings, sections). Demons
 
 **Status:** Complete. Strong directional signal that markdown-aware improves retrieval on structured docs.
 
-### Real pilot-scope promotion gate: NOT YET EXECUTED
+### Evidence 3: Real pilot-scope gate (w1_real_pilot.json, 10 queries, joblogic-kb/api-docs)
 
-The full promotion gate (per "For chunking strategy changes" above) requires:
-1. Enable markdown-aware on a **real production pilot scope** with actual client documents
-2. Run the **full golden question set** for that scope (not a synthetic dataset)
-3. Verify nDCG@5 does not regress more than 0.01 from baseline
+Real production documents from `ai-agentopia/docs` repo (9 of 10 source documents loaded, 1 not found locally). 10 labeled queries with source-level relevance grading.
 
-This has **not been done**. W1 remains opt-in and is NOT promoted for production use until a real pilot-scope evaluation is completed.
+**Gate result: FAILED** — nDCG@5 regressed beyond tolerance.
+
+| Metric | FIXED_SIZE (244 chunks) | MARKDOWN_AWARE (371 chunks) | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.7440 | 0.6309 | **-0.1131** |
+| MRR | 0.7500 | 0.6333 | -0.1167 |
+| P@5 | 0.4000 | 0.3600 | -0.0400 |
+| R@5 | 1.8000 | 1.6000 | -0.2000 |
+
+**Root cause:** Markdown-aware chunking produces 52% more chunks (371 vs 244) from the same documents. With in-memory cosine similarity, the larger chunk set dilutes retrieval scores — smaller chunks have less text overlap with queries, causing ranking degradation on some queries.
+
+**Key finding:** The chunk-count increase from heading-boundary splitting is a trade-off. Markdown-aware improves precision when queries target specific sections (e.g., "How does the governed PR review work?" → correct heading section ranked higher) but degrades when the search model cannot distinguish many small chunks effectively.
+
+**Script:** `evaluation/w1_real_pilot_gate.py`
+**Results:** `evaluation/results/w1_real_pilot_gate.json`
+**Dataset labels:** DRAFT — requires CTO review before use as authoritative gate evidence.
 
 ### Current W1 status
 
 - Implementation: complete, merged, opt-in only
-- Regression check: complete, no regression
-- Synthetic benchmark: complete, strong positive signal
-- Real pilot-scope gate: **pending** — requires a production scope with documents and a labeled golden question set
+- Regression check on seed scope: complete, no regression
+- Synthetic benchmark: complete, positive signal (nDCG@5 +0.4095)
+- Real pilot-scope gate: **FAILED** (nDCG@5 -0.1131)
+- W1 remains opt-in. NOT promoted for production use.
+- Next steps: investigate chunk-count trade-off, consider minimum chunk merging or embedding-based search evaluation
 
 ---
 
