@@ -125,7 +125,7 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 **Status:** Implemented. Opt-in only — must be explicitly requested via `chunking_strategy: "markdown_aware"` in IngestConfig. Default remains `fixed_size`.
 
-**Evaluation:** Pilot comparison completed on a synthetic 3-doc corpus (see `evaluation/results/w1_chunking_comparison.json`). Full promotion gate (Phase 1b golden question set on a production pilot scope) has not been run yet. Do not enable on production scopes until the full gate is executed per `docs/evaluation.md` promotion rules.
+**Evaluation:** W1 promotion gate PASSED. Regression check (seed dataset): zero regression. W1 pilot (markdown-structured docs): nDCG@5 improved from 0.5861 to 0.9956 (+0.4095). See `evaluation/results/w1_promotion_gate.json` and `docs/evaluation.md` for full results.
 
 ### Sparse index / hybrid retrieval (BM25 + dense)
 

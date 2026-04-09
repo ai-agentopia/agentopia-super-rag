@@ -1,0 +1,85 @@
+{
+  "version": "1.0",
+  "phase": "1b",
+  "description": "W1 promotion gate pilot dataset — markdown-structured documents to evaluate MARKDOWN_AWARE vs FIXED_SIZE. Relevance labels use source-level matching (any chunk from the correct source is relevant) because chunk_index differs between strategies.",
+  "grading_scale": {
+    "0": "irrelevant — chunk has no useful information for the query",
+    "1": "partially relevant — chunk contains related but incomplete information",
+    "2": "fully relevant — chunk directly answers or substantially addresses the query"
+  },
+  "label_strategy": "source-level: all chunks from the labeled source are graded relevant. This allows fair comparison across chunking strategies that produce different chunk counts and indices.",
+  "wave": "W1 pilot — 5 queries against markdown-structured documentation",
+  "samples": [
+    {
+      "id": "w1-01",
+      "query": "How does the two-phase ingestion pipeline work?",
+      "scope": "w1-pilot/docs",
+      "scenario": "process_explanation",
+      "relevant_sources": ["api-reference.md"],
+      "relevant_chunks": [
+        {"source": "api-reference.md", "chunk_index": 0, "relevance": 1, "reason": "Contains heading and intro, partial context"},
+        {"source": "api-reference.md", "chunk_index": 1, "relevance": 1, "reason": "Contains auth section, partial context"},
+        {"source": "api-reference.md", "chunk_index": 2, "relevance": 2, "reason": "Contains Ingestion Pipeline section — direct answer"},
+        {"source": "api-reference.md", "chunk_index": 3, "relevance": 0, "reason": "Search section — not about ingestion"},
+        {"source": "api-reference.md", "chunk_index": 4, "relevance": 0, "reason": "Error handling — not about ingestion"}
+      ]
+    },
+    {
+      "id": "w1-02",
+      "query": "What authentication methods does the knowledge API support?",
+      "scope": "w1-pilot/docs",
+      "scenario": "security_architecture",
+      "relevant_sources": ["api-reference.md"],
+      "relevant_chunks": [
+        {"source": "api-reference.md", "chunk_index": 0, "relevance": 0, "reason": "Title only"},
+        {"source": "api-reference.md", "chunk_index": 1, "relevance": 2, "reason": "Authentication section — direct answer"},
+        {"source": "api-reference.md", "chunk_index": 2, "relevance": 0, "reason": "Ingestion — not about auth"},
+        {"source": "api-reference.md", "chunk_index": 3, "relevance": 0, "reason": "Search — not about auth"},
+        {"source": "api-reference.md", "chunk_index": 4, "relevance": 0, "reason": "Error handling — not about auth"}
+      ]
+    },
+    {
+      "id": "w1-03",
+      "query": "How do I configure the Helm chart for knowledge-api?",
+      "scope": "w1-pilot/docs",
+      "scenario": "configuration_detail",
+      "relevant_sources": ["deployment-guide.md"],
+      "relevant_chunks": [
+        {"source": "deployment-guide.md", "chunk_index": 0, "relevance": 0, "reason": "Title only"},
+        {"source": "deployment-guide.md", "chunk_index": 1, "relevance": 1, "reason": "Prerequisites — related but not Helm config"},
+        {"source": "deployment-guide.md", "chunk_index": 2, "relevance": 2, "reason": "Helm Chart Configuration — direct answer"},
+        {"source": "deployment-guide.md", "chunk_index": 3, "relevance": 0, "reason": "ArgoCD updater — not Helm config"},
+        {"source": "deployment-guide.md", "chunk_index": 4, "relevance": 0, "reason": "Health checks — not Helm config"},
+        {"source": "deployment-guide.md", "chunk_index": 5, "relevance": 0, "reason": "Troubleshooting — not Helm config"}
+      ]
+    },
+    {
+      "id": "w1-04",
+      "query": "What health check endpoints does the service expose?",
+      "scope": "w1-pilot/docs",
+      "scenario": "factual_recall",
+      "relevant_sources": ["deployment-guide.md"],
+      "relevant_chunks": [
+        {"source": "deployment-guide.md", "chunk_index": 0, "relevance": 0, "reason": "Title only"},
+        {"source": "deployment-guide.md", "chunk_index": 1, "relevance": 0, "reason": "Prerequisites"},
+        {"source": "deployment-guide.md", "chunk_index": 2, "relevance": 0, "reason": "Helm config"},
+        {"source": "deployment-guide.md", "chunk_index": 3, "relevance": 0, "reason": "ArgoCD updater"},
+        {"source": "deployment-guide.md", "chunk_index": 4, "relevance": 2, "reason": "Health Checks section — direct answer"},
+        {"source": "deployment-guide.md", "chunk_index": 5, "relevance": 0, "reason": "Troubleshooting"}
+      ]
+    },
+    {
+      "id": "w1-05",
+      "query": "What is the document provenance tracking design?",
+      "scope": "w1-pilot/docs",
+      "scenario": "architecture_decision",
+      "relevant_sources": ["adr-011.md"],
+      "relevant_chunks": [
+        {"source": "adr-011.md", "chunk_index": 0, "relevance": 1, "reason": "Title — partial context"},
+        {"source": "adr-011.md", "chunk_index": 1, "relevance": 0, "reason": "Status only"},
+        {"source": "adr-011.md", "chunk_index": 2, "relevance": 2, "reason": "Decision section — direct answer"},
+        {"source": "adr-011.md", "chunk_index": 3, "relevance": 1, "reason": "Consequences — related follow-up"}
+      ]
+    }
+  ]
+}
