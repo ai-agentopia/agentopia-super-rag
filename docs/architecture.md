@@ -9,18 +9,23 @@ It does not make workflow decisions, does not call LLMs for reasoning, and does 
 ### What this service exposes
 
 ```
-/api/v1/knowledge/{scope}/ingest      POST   — operator-initiated doc ingest
-/api/v1/knowledge/{scope}/search      GET    — scoped semantic search
-/api/v1/knowledge/{scope}/documents   GET    — list documents in scope
-/api/v1/knowledge/{scope}/reindex     POST   — re-embed all docs in scope
-/api/v1/knowledge/{scope}             DELETE — remove scope and all docs
-/api/v1/knowledge/scopes              GET    — list scopes accessible to caller
-/api/v1/knowledge/stale               GET    — scopes with outdated embeddings
-/internal/health                      GET    — deep health: Qdrant + binding cache
-/internal/binding-sync                POST   — webhook: bot-config-api pushes binding updates
-/internal/binding-sync/{bot_name}     DELETE — webhook: bot deleted
-/health                               GET    — shallow health: Postgres + Redis
+/api/v1/knowledge/search                        GET    — scoped semantic search (scopes via query param)
+/api/v1/knowledge/scopes                        GET    — list scopes accessible to caller
+/api/v1/knowledge/stale                         GET    — scopes with outdated embeddings
+/api/v1/knowledge/{scope}                       GET    — scope metadata
+/api/v1/knowledge/{scope}                       DELETE — remove scope and all docs
+/api/v1/knowledge/{scope}/ingest                POST   — operator-initiated doc ingest
+/api/v1/knowledge/{scope}/reindex               POST   — re-embed all docs in scope
+/api/v1/knowledge/{scope}/documents             GET    — list documents in scope
+/api/v1/knowledge/{scope}/documents/{source}    DELETE — remove specific document by source path
+/internal/health                                GET    — deep health: Qdrant + binding cache
+/internal/binding-sync                          POST   — webhook: bot-config-api pushes binding updates
+/internal/binding-sync/{bot_name}               GET    — query single bot binding state
+/internal/binding-sync/{bot_name}               DELETE — webhook: bot deleted
+/health                                         GET    — shallow health: Postgres + Redis
 ```
+
+**Search scoping note:** `/api/v1/knowledge/search` resolves scope access server-side. Bot callers (bearer token) get scopes from the binding cache. Operator callers (internal token) pass `?scopes=` query parameters explicitly. There is no per-scope search path — scope isolation is enforced inside the handler, not by the URL.
 
 ---
 

@@ -1,6 +1,6 @@
 # Migration: Extraction from agentopia-protocol
 
-## Current Phase: Phase 0 — Repo Bootstrap
+## Current Phase: Phase 0 — Contract / Ownership Freeze
 
 The service code has not yet been extracted. Production continues to run from:
 
@@ -14,38 +14,90 @@ agentopia-protocol/knowledge-api/
 │   ├── services/binding_cache.py   ← K8s CRD binding cache
 │   ├── auth/guards.py              ← dual-path auth
 │   ├── routers/knowledge.py        ← API routes
+│   ├── routers/internal.py         ← internal binding-sync, deep health
 │   ├── evaluation/                 ← golden question sets, metrics runner
 │   └── tests/
 └── Dockerfile
 ```
 
-This repo (`agentopia-super-rag`) currently contains only documentation. Code extraction has not started.
+---
+
+## Phase 0 Exit Checklist
+
+Phase 1 (repo bootstrap) must not begin until all items below are closed.
+
+- [ ] **A1** — [agentopia-super-rag#1](https://github.com/ai-agentopia/agentopia-super-rag/issues/1): API contract frozen — `docs/architecture.md` verified against source at freeze commit and accepted by CTO
+- [ ] **A2** — [agentopia-protocol#387](https://github.com/ai-agentopia/agentopia-protocol/issues/387): Freeze notice committed to `agentopia-protocol/knowledge-api/` — no new features after this date
+- [ ] **A3** — [agentopia-super-rag#2](https://github.com/ai-agentopia/agentopia-super-rag/issues/2): Artifact ownership cutover rule accepted — single publisher, explicit sequence, no overlap
+- [ ] **A4** — [agentopia-super-rag#3](https://github.com/ai-agentopia/agentopia-super-rag/issues/3): This file updated with Phase 0 exit checklist and cutover rule (this doc)
+
+---
+
+## Image Ownership Cutover Rule
+
+**Single publisher rule:** `ghcr.io/ai-agentopia/knowledge-api` has exactly one publisher at any given time.
+
+Current publisher: `agentopia-protocol` CI.
+Future publisher (after Phase 3): `agentopia-super-rag` CI.
+
+**Cutover sequence (must be followed in order):**
+
+1. `agentopia-super-rag/.github/workflows/build-image.yml` switched from `workflow_dispatch` to `push` trigger on `dev`
+2. First `dev-{sha}` image pushed from this repo — GHCR URL captured as evidence
+3. `agentopia-infra` Image Updater annotation updated to track new publisher (agentopia-infra#113)
+4. `agentopia-protocol` CI image push step disabled in same deploy window (agentopia-protocol#389)
+5. Deployed pod image SHA verified against GHCR push from this repo
+
+**No-overlap constraint:** Steps 3 and 4 must be completed in the same deploy window. There is no period where both repos push to the same image tag. If step 2 fails, abort — do not proceed to steps 3/4.
+
+The atomic cutover transaction is owned by **agentopia-super-rag#24**.
 
 ---
 
 ## Extraction Phases
 
-### Phase 0 (current): Repo bootstrap
+### Phase 0 (current): Contract / Ownership Freeze
 - [x] GitHub repo created
-- [x] Documentation baseline written
-- [ ] Code not yet moved
+- [x] Documentation baseline written and route table verified against source
+- [x] Phase 0 exit checklist added to this doc
+- [x] Image ownership cutover rule documented
+- [ ] A1: CTO sign-off on docs/architecture.md as authoritative contract
+- [ ] A2: Freeze notice committed to agentopia-protocol/knowledge-api/
+- [ ] A3: Artifact ownership issue accepted
+- [ ] A4: This doc accepted as complete
 
-### Phase 1: Code mirror
-Move the `agentopia-protocol/knowledge-api/` subtree into this repo without functional changes:
-- Copy `src/`, `Dockerfile`, `pyproject.toml`, `requirements.txt`
-- Copy `evaluation/` with all datasets and runners
-- Set up CI in this repo (test gate + Docker build/push)
-- The monorepo path (`agentopia-protocol/knowledge-api/`) becomes a stub that imports from this service or is deleted
+### Phase 1: Repo Bootstrap
+Set up the new repo structure before any code moves:
+- Directory skeleton: `src/`, `src/tests/`, `evaluation/`, `.github/workflows/`
+- `pyproject.toml`, `requirements.txt` (version-pinned, matching monorepo freeze commit)
+- CI: fast test gate on push to `dev`; Docker build workflow exists but image push is `workflow_dispatch` only (gated until Phase 3 cutover)
+- README and docs verified and signed off (B3)
 
-### Phase 2: Infrastructure handover
-- Move Helm templates from `agentopia-infra/charts/agentopia-base/templates/knowledge-api.yaml` to a chart owned by this repo (or referenced chart)
-- Update ArgoCD Image Updater to track this repo's image tag pattern
-- Update `agentopia-protocol` bot-config-api to reference the new image/service DNS (no change expected — service DNS in cluster stays the same)
+### Phase 2: Code Extraction
+Copy monorepo source without functional changes (using freeze commit SHA as copy source):
+- `src/` (all modules), `Dockerfile`, `pyproject.toml`, `requirements.txt`
+- `evaluation/` with all datasets and runners
+- `tests/`
+- Zero behavior drift: `diff -r` between copied source and monorepo freeze commit must show path changes only
+- Contract preservation audit (C4) required before Phase 3 begins
 
-### Phase 3: Stable extracted service
-- This repo is the single source of truth for the retrieval service
-- `agentopia-protocol` no longer contains knowledge-api source
-- CI/CD fully owned here
+### Phase 3: Atomic Cutover
+Transfer image ownership per the cutover rule above (agentopia-super-rag#24):
+- Enable image push in this repo's CI
+- Switch ArgoCD Image Updater (agentopia-infra#113)
+- Disable monorepo image push (agentopia-protocol#389)
+- Post-cutover validation in `agentopia-dev` (agentopia-super-rag#12)
+- Rollback drill mandatory (agentopia-super-rag#13)
+- Monorepo source retired only after validation + rollback drill confirmed (agentopia-protocol#388)
+
+### Phase 4: Wiki-RAG Evolution
+Incremental retrieval improvements, each isolated and independently evaluated:
+- **W1**: Markdown-aware chunking (`ChunkingStrategy.MARKDOWN_AWARE`)
+- **W1.5**: Context/path-aware retrieval — preserve document hierarchy/path in chunk metadata to improve docs/wiki corpora
+- **W3a**: Query expansion via LLM alternative phrasings (per-scope opt-in, latency budget required)
+- **W3b**: HyDE — hypothetical document embedding (separate eval run from W3a)
+- **W4**: Cross-encoder reranking (highest cost, CTO approval per scope)
+- **W2**: BM25 hybrid — **FROZEN**, conditional reopen only (agentopia-super-rag#15)
 
 ---
 
