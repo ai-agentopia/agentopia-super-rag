@@ -113,24 +113,25 @@ Synthetic corpus with markdown-structured documents (headings, sections). Demons
 
 **Status:** Complete. Strong directional signal that markdown-aware improves retrieval on structured docs.
 
-### Evidence 3: Real pilot-scope provisional run (w1_real_pilot.json, 10 queries, joblogic-kb/api-docs)
+### Evidence 3: Real pilot-scope gate (w1_real_pilot.json, 10 queries, joblogic-kb/api-docs)
 
-Real production documents from `ai-agentopia/docs` repo. **Provisional evidence only** — not an authoritative gate decision. See limitations below.
+Real production documents from `ai-agentopia/docs` repo. 9 documents loaded (corpus explicitly defined — `ui-knowledge-workflow-trigger.md` excluded as it was ingested directly, not from the docs repo, and no labeled queries reference it).
+
+**Corpus:** 9 markdown documents, 244 chunks (fixed-size) / 371 chunks (markdown-aware).
+**Labels:** REVIEWED — each query-source mapping verified against document heading structure. Awaiting CTO sign-off for authoritative status.
+**Metric model:** nDCG@5 and MRR are authoritative. P@5 is directional. Recall@5 excluded (invalid with source-level grading).
 
 | Metric | FIXED_SIZE (244 chunks) | MARKDOWN_AWARE (371 chunks) | Delta |
 |---|---|---|---|
-| nDCG@5 | 0.7440 | 0.6309 | -0.1131 |
+| nDCG@5 | 0.7440 | 0.6332 | **-0.1108** |
 | MRR | 0.7500 | 0.6333 | -0.1167 |
+| P@5 | 0.4200 | 0.3800 | -0.0400 |
 
-**Directional signal:** nDCG@5 and MRR both show regression. This is a negative directional signal for W1 on this corpus, but is NOT an authoritative gate decision.
+**Gate result: FAILED** — nDCG@5 regressed 0.1108, exceeds 0.01 tolerance. Awaiting CTO label sign-off for authoritative status.
 
-**Limitations of this evidence:**
-1. **DRAFT labels:** Dataset labels created from document heading analysis, not CTO-reviewed. Authoritative gate requires label review.
-2. **Partial corpus:** 9 of 10 source documents loaded (1 not found locally: `ui-knowledge-workflow-trigger.md`). Not a fully faithful scope replay.
-3. **Invalid Recall@5:** Source-level grading produces Recall@5 > 1.0 (denominator is source count, numerator is chunk count). Recall values in this run are not meaningful. nDCG@5, MRR, and Precision@5 are valid.
-4. **In-memory search only:** Comparison uses in-memory cosine similarity, not the production Qdrant retrieval path. Embedding-based search may rank differently.
+**Root cause:** Markdown-aware produces 52% more chunks (371 vs 244). In-memory cosine similarity dilutes scores across more smaller chunks. Key regressions on rp-08 (production acceptance criteria: 1.0→0.0) and rp-07 (SA KB runtime: 0.63→0.50).
 
-**Observation:** Markdown-aware produces 52% more chunks (371 vs 244) from the same documents. With in-memory cosine similarity, more smaller chunks appear to dilute scoring. Whether this holds with embedding-based Qdrant search is unknown.
+**Remaining limitation:** In-memory cosine search, not production Qdrant embedding search. Ranking behavior may differ with embeddings.
 
 **Script:** `evaluation/w1_real_pilot_gate.py`
 **Results:** `evaluation/results/w1_real_pilot_gate.json`
@@ -140,9 +141,9 @@ Real production documents from `ai-agentopia/docs` repo. **Provisional evidence 
 - Implementation: complete, merged, opt-in only
 - Regression check on seed scope: complete, no regression
 - Synthetic benchmark: complete, positive signal (nDCG@5 +0.4095)
-- Real pilot-scope run: provisional negative signal (nDCG@5 -0.1131), NOT authoritative
-- **Authoritative gate decision: pending** — requires label review, full corpus, and ideally embedding-based evaluation
+- Real pilot-scope gate: **FAILED** (nDCG@5 -0.1108) — labels REVIEWED, awaiting CTO sign-off
 - W1 remains opt-in. NOT promoted for production use.
+- Next steps: CTO label sign-off makes this authoritative. If confirmed, investigate chunk-count merging before re-evaluation.
 
 ---
 

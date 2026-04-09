@@ -52,7 +52,8 @@ SOURCE_MAP = {
     "production-sa-knowledge-base.md": "milestones/production-sa-knowledge-base.md",
     "production-super-rag.md": "milestones/production-super-rag.md",
     "p1-web-app-primary-dual-lane-mvp.md": "milestones/p1-web-app-primary-dual-lane-mvp.md",
-    "ui-knowledge-workflow-trigger.md": None,  # May not exist in docs repo
+    # ui-knowledge-workflow-trigger.md excluded — ingested directly, not in docs repo.
+    # No labeled queries reference it. Pilot corpus is 9 documents.
 }
 
 
@@ -155,14 +156,20 @@ def grade_source_level(retrieved, relevant_sources, k):
             "relevance_grade": grade,
         })
 
-    total_relevant = sum(1 for rs in relevant_sources if rs["relevance"] >= 1)
-    metrics = compute_query_metrics(relevances, total_relevant, k)
+    # Compute only valid metrics for source-level grading.
+    # Recall@5 is invalid: denominator = source count, numerator = chunk count → can exceed 1.0.
+    # nDCG@5, MRR, P@5 are valid because they only use the relevance list.
+    from evaluation.retrieval_metrics import ndcg_at_k, mrr as compute_mrr, precision_at_k
+    metrics = {
+        "ndcg": round(ndcg_at_k(relevances, k), 4),
+        "mrr": round(compute_mrr(relevances), 4),
+        "precision": round(precision_at_k(relevances, k), 4),
+    }
 
     return {
         "relevances": relevances,
         "metrics": metrics,
         "grading_detail": detail,
-        "total_relevant_in_labels": total_relevant,
         "retrieved_count": len(retrieved),
     }
 
@@ -191,9 +198,9 @@ def run_strategy(docs, dataset, strategy, chunk_size=512):
             **grading,
         })
 
-    # Aggregate
+    # Aggregate (only valid metrics — no recall)
     aggregates = {}
-    for metric in ["ndcg", "mrr", "precision", "recall"]:
+    for metric in ["ndcg", "mrr", "precision"]:
         values = [q["metrics"][metric] for q in per_query]
         aggregates[metric] = {
             "mean": round(sum(values) / len(values), 4) if values else None,
@@ -262,7 +269,7 @@ def main():
             print(
                 f"  {q['id']} ({q['scenario']:<25s}) "
                 f"nDCG={m['ndcg']:.4f}  MRR={m['mrr']:.4f}  "
-                f"P@5={m['precision']:.4f}  R@5={m['recall']:.4f}  "
+                f"P@5={m['precision']:.4f}  "
                 f"top1={top_src}:{top_sec[:20]}"
             )
         print()
@@ -273,12 +280,12 @@ def main():
     print("-" * 72)
 
     deltas = {}
-    for metric in ["ndcg", "mrr", "precision", "recall"]:
+    for metric in ["ndcg", "mrr", "precision"]:
         fs_val = fs_result["aggregates"][metric]["mean"]
         md_val = md_result["aggregates"][metric]["mean"]
         delta = md_val - fs_val if fs_val is not None and md_val is not None else None
         deltas[metric] = delta
-        label = {"ndcg": "nDCG@5", "mrr": "MRR", "precision": "P@5", "recall": "R@5"}[metric]
+        label = {"ndcg": "nDCG@5", "mrr": "MRR", "precision": "P@5"}[metric]
         d = f"{delta:+.4f}" if delta is not None else "N/A"
         print(f"{label:<15} {fs_val:>12.4f} {md_val:>12.4f} {d:>10}")
 
@@ -329,11 +336,11 @@ def main():
             "aggregates": md_result["aggregates"],
             "per_query": [{"id": q["id"], "scenario": q["scenario"], "metrics": q["metrics"]} for q in md_result["per_query"]],
         },
+        "metric_model": "nDCG@5 and MRR authoritative. P@5 directional. Recall@5 excluded (invalid with source-level grading).",
         "deltas": {
             "nDCG@5": round(deltas.get("ndcg", 0), 4),
             "MRR": round(deltas.get("mrr", 0), 4),
             "P@5": round(deltas.get("precision", 0), 4),
-            "R@5": round(deltas.get("recall", 0), 4),
         },
     }
 
