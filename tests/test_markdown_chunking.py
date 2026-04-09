@@ -18,6 +18,7 @@ from models.knowledge import (
 from services.knowledge import (
     KnowledgeService,
     chunk_document,
+    _chunk_fixed_size,
     _chunk_markdown_aware,
     _split_oversized_block,
 )
@@ -122,10 +123,10 @@ class TestMarkdownAwareChunking:
         assert "Third paragraph" in chunks[0]
 
     def test_paragraph_split_when_exceeds_max(self):
-        """Paragraphs are split into separate chunks when combined exceeds max_size."""
+        """Content under headings splits when combined exceeds max_size."""
         para_a = "Paragraph A content. " * 20  # ~420 chars
         para_b = "Paragraph B content. " * 20  # ~420 chars
-        content = f"{para_a}\n\n{para_b}"
+        content = f"# Section A\n{para_a}\n\n# Section B\n{para_b}"
         chunks = _chunk_markdown_aware(content, max_size=450)
         assert len(chunks) == 2
 
@@ -176,13 +177,22 @@ class TestMarkdownAwareChunking:
         # but chunk_document filters empty chunks, so this is fine
         assert isinstance(chunks, list)
 
-    def test_non_markdown_falls_back(self):
-        """Plain text without markdown structure falls back to fixed-size."""
+    def test_non_markdown_falls_back_to_fixed_size(self):
+        """Plain text without markdown structure falls back to fixed-size chunking."""
         content = "Just plain text without any headings or formatting. " * 50
-        chunks = _chunk_markdown_aware(content, max_size=500)
-        assert len(chunks) >= 1
-        for chunk in chunks:
+        md_chunks = _chunk_markdown_aware(content, max_size=500)
+        fs_chunks = _chunk_fixed_size(content, 500, 500 // 8)
+        # Must produce identical output to fixed-size
+        assert md_chunks == fs_chunks
+        for chunk in md_chunks:
             assert len(chunk) <= 500
+
+    def test_paragraph_only_falls_back_to_fixed_size(self):
+        """Content with paragraphs but no headings/fences falls back to fixed-size."""
+        content = "First paragraph text.\n\nSecond paragraph text.\n\nThird paragraph text."
+        md_chunks = _chunk_markdown_aware(content, max_size=500)
+        fs_chunks = _chunk_fixed_size(content, 500, 500 // 8)
+        assert md_chunks == fs_chunks
 
 
 # ── Unit: _split_oversized_block ────────────────────────────────────────

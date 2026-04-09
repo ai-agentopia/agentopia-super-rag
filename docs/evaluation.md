@@ -74,12 +74,12 @@ Output: per-question scores, aggregate nDCG/MRR/P@k/R@k, comparison delta if bas
 
 Embedding model changes affect the entire vector space. They require:
 1. Re-embedding all documents in all scopes (full reindex)
-2. Dimension validation passes (new dimension ≠ old dimension → hard error, enforced in `QdrantBackend`)
+2. Dimension validation: `QdrantBackend._validate_collection_dimensions()` logs a warning on mismatch but does NOT block startup — this allows graceful migration where new scopes use the new dimension while old scopes are reindexed incrementally
 3. Full evaluation run across all scopes
 4. Staged rollout: new model on new scopes first, existing scopes migrated scope-by-scope
 5. Gate: all scopes must maintain nDCG@5 ≥ 0.90 (current minus 0.025 margin)
 
-**Embedding model changes are never applied in-place.** A mismatch between stored collection dimension and configured model dimension is a startup error.
+**Dimension mismatch is warning-only, not a hard error.** The operator must monitor for `DIMENSION_MISMATCH` log warnings and schedule reindexing of affected scopes. Queries against mismatched collections will return degraded results until reindexed.
 
 ---
 
@@ -99,9 +99,14 @@ Comparison of `fixed_size` vs `markdown_aware` on a 3-document documentation cor
 | Source accuracy (top-1) | 3/6 | 3/6 |
 | Avg search score | 0.6444 | 0.6444 |
 
-**Gate status:** PASSED — markdown-aware matches or exceeds fixed-size on all metrics.
+**Status:** Pilot comparison completed. This is NOT the full promotion gate — it uses a synthetic 3-doc corpus and in-memory search, not a production pilot scope with the golden question set.
 
-**Rollout recommendation:** Safe as opt-in for documentation-heavy scopes. NOT recommended as default until validated on at least 3 production scopes per promotion gate rules above.
+**Remaining before gate can pass:**
+1. Run on a real pilot scope with production documents
+2. Run the full Phase 1b golden question set for that scope
+3. Verify nDCG@5 does not regress more than 0.01 from baseline
+
+**Rollout recommendation:** Implemented and available as opt-in. Do NOT enable on production scopes until the full promotion gate above is executed.
 
 ---
 

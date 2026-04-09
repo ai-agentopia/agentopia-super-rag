@@ -125,7 +125,7 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 **Status:** Implemented. Opt-in only — must be explicitly requested via `chunking_strategy: "markdown_aware"` in IngestConfig. Default remains `fixed_size`.
 
-**Evaluation (W1 gate):** On a 3-document docs corpus, markdown-aware preserved 5/5 code blocks intact (vs 3/5 fixed-size), produced 96% of chunks with section headings (vs 94%), and matched or exceeded fixed-size on all search metrics. Safe for opt-in deployment on documentation-heavy scopes.
+**Evaluation:** Pilot comparison completed on a synthetic 3-doc corpus (see `evaluation/results/w1_chunking_comparison.json`). Full promotion gate (Phase 1b golden question set on a production pilot scope) has not been run yet. Do not enable on production scopes until the full gate is executed per `docs/evaluation.md` promotion rules.
 
 ### Sparse index / hybrid retrieval (BM25 + dense)
 
