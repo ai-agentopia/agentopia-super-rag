@@ -83,6 +83,28 @@ Embedding model changes affect the entire vector space. They require:
 
 ---
 
+## W1 Evaluation Results — Markdown-Aware Chunking
+
+**Date:** 2026-04-09  
+**Script:** `evaluation/w1_chunking_comparison.py`  
+**Results:** `evaluation/results/w1_chunking_comparison.json`
+
+Comparison of `fixed_size` vs `markdown_aware` on a 3-document documentation corpus (6 queries):
+
+| Metric | fixed_size | markdown_aware |
+|---|---|---|
+| Code blocks intact | 3/5 | **5/5** |
+| Chunks with section heading | 15/16 | **26/27** |
+| Section relevance (top-1) | 1/6 | **2/6** |
+| Source accuracy (top-1) | 3/6 | 3/6 |
+| Avg search score | 0.6444 | 0.6444 |
+
+**Gate status:** PASSED — markdown-aware matches or exceeds fixed-size on all metrics.
+
+**Rollout recommendation:** Safe as opt-in for documentation-heavy scopes. NOT recommended as default until validated on at least 3 production scopes per promotion gate rules above.
+
+---
+
 ## What Is Not Evaluated Here
 
 - Reasoning quality (planner, reviewer-shadow) — owned by `agentopia-graph-executor`

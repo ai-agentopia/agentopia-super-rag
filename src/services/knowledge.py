@@ -65,7 +65,9 @@ def chunk_document(
 
     Returns list of DocumentChunks ready for embedding.
     """
-    if config.chunking_strategy == ChunkingStrategy.PARAGRAPH:
+    if config.chunking_strategy == ChunkingStrategy.MARKDOWN_AWARE:
+        texts = _chunk_markdown_aware(content, config.chunk_size)
+    elif config.chunking_strategy == ChunkingStrategy.PARAGRAPH:
         texts = _chunk_by_paragraph(content, config.chunk_size)
     elif config.chunking_strategy == ChunkingStrategy.CODE_AWARE:
         texts = _chunk_code_aware(content, config.chunk_size)
@@ -146,6 +148,165 @@ def _chunk_code_aware(content: str, max_size: int) -> list[str]:
     if current:
         chunks.append(current)
     return chunks or [content[:max_size]]
+
+
+def _chunk_markdown_aware(content: str, max_size: int) -> list[str]:
+    """Markdown-aware chunking (W1 #14): split on structural boundaries.
+
+    Break-point priority: heading > code fence > paragraph > list item > newline.
+    Preserves semantic units for documentation-heavy corpora.
+    Falls back to fixed-size splitting if no markdown structure is detected.
+    """
+    import re
+
+    # Phase 1: Parse content into typed blocks.
+    # A "section" starts at each heading and includes all content until the next heading.
+    # Code fences are standalone blocks. Paragraph groups (between empty lines) are blocks.
+    #
+    # Block types: "heading_section" (strong boundary — never merge across),
+    #              "code_fence", "paragraph"
+    blocks: list[tuple[str, str]] = []  # (type, content)
+    lines = content.split("\n")
+    current_lines: list[str] = []
+    current_type = "paragraph"
+    in_code_fence = False
+
+    for line in lines:
+        stripped = line.strip()
+
+        # Track code fence state
+        if stripped.startswith("```"):
+            if in_code_fence:
+                # Closing fence — finish the code block
+                current_lines.append(line)
+                blocks.append(("code_fence", "\n".join(current_lines)))
+                current_lines = []
+                current_type = "paragraph"
+                in_code_fence = False
+                continue
+            else:
+                # Opening fence — flush current block first
+                if current_lines:
+                    blocks.append((current_type, "\n".join(current_lines)))
+                    current_lines = []
+                current_lines.append(line)
+                current_type = "code_fence"
+                in_code_fence = True
+                continue
+
+        if in_code_fence:
+            current_lines.append(line)
+            continue
+
+        # Heading → strong boundary: starts a new heading_section
+        if re.match(r"^#{1,6}\s+", stripped):
+            if current_lines:
+                blocks.append((current_type, "\n".join(current_lines)))
+                current_lines = []
+            current_lines.append(line)
+            current_type = "heading_section"
+            continue
+
+        # Empty line → paragraph boundary (weaker)
+        if not stripped:
+            if current_lines:
+                blocks.append((current_type, "\n".join(current_lines)))
+                current_lines = []
+                current_type = "paragraph"
+            continue
+
+        current_lines.append(line)
+
+    # Flush remaining
+    if current_lines:
+        blocks.append((current_type, "\n".join(current_lines)))
+
+    # If no blocks were produced (non-markdown content), fall back to fixed-size
+    if not blocks:
+        return _chunk_fixed_size(content, max_size, max_size // 8)
+
+    # Phase 2: Merge adjacent blocks respecting boundary strength.
+    # heading_section → strong boundary: always starts a new chunk
+    # code_fence/paragraph → weak boundary: merge into current chunk if fits
+    chunks: list[str] = []
+    current = ""
+
+    for block_type, block_text in blocks:
+        block_text = block_text.strip()
+        if not block_text:
+            continue
+
+        # Strong boundary: heading_section always starts a new chunk
+        if block_type == "heading_section":
+            if current:
+                chunks.append(current)
+            # If the heading section itself exceeds max_size, split it
+            if len(block_text) > max_size:
+                sub_chunks = _split_oversized_block(block_text, max_size)
+                chunks.extend(sub_chunks[:-1])
+                current = sub_chunks[-1] if sub_chunks else ""
+            else:
+                current = block_text
+            continue
+
+        # If the block itself exceeds max_size, split it
+        if len(block_text) > max_size:
+            if current:
+                chunks.append(current)
+                current = ""
+            sub_chunks = _split_oversized_block(block_text, max_size)
+            chunks.extend(sub_chunks)
+            continue
+
+        # Try to merge with current accumulator
+        separator = "\n\n"
+        merged_len = len(current) + len(separator) + len(block_text) if current else len(block_text)
+        if merged_len <= max_size:
+            current = f"{current}{separator}{block_text}" if current else block_text
+        else:
+            if current:
+                chunks.append(current)
+            current = block_text
+
+    if current:
+        chunks.append(current)
+
+    return chunks
+
+
+def _split_oversized_block(block: str, max_size: int) -> list[str]:
+    """Split an oversized block on internal boundaries (newline, list items).
+
+    Used by _chunk_markdown_aware when a single structural block exceeds max_size.
+    """
+    lines = block.split("\n")
+    chunks: list[str] = []
+    current = ""
+
+    for line in lines:
+        if not current:
+            current = line
+        elif len(current) + 1 + len(line) <= max_size:
+            current = f"{current}\n{line}"
+        else:
+            chunks.append(current)
+            current = line
+
+    if current:
+        chunks.append(current)
+
+    # Final safety: if any chunk still exceeds max_size, hard-split
+    result: list[str] = []
+    for chunk in chunks:
+        if len(chunk) <= max_size:
+            result.append(chunk)
+        else:
+            start = 0
+            while start < len(chunk):
+                result.append(chunk[start : start + max_size])
+                start += max_size
+
+    return result
 
 
 def _extract_section(text: str) -> str:

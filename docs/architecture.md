@@ -119,9 +119,13 @@ query string
 
 The following are planned retrieval quality improvements, labeled explicitly as future. None are currently shipped.
 
-### Markdown-aware chunking
+### Markdown-aware chunking (W1 — shipped, opt-in)
 
-A chunking strategy that scores break-points by structural element (heading > code fence > paragraph > list > newline) rather than character count. Preserves semantic units for documentation-heavy corpora. Will be added as `ChunkingStrategy.MARKDOWN_AWARE`. Requires evaluation re-run on affected scopes before enabling.
+`ChunkingStrategy.MARKDOWN_AWARE` — splits on structural boundaries: heading > code fence > paragraph > list > newline. Headings always create strong chunk boundaries (never merged across). Code fences are preserved intact. Falls back to fixed-size splitting for content without markdown structure or for oversized blocks.
+
+**Status:** Implemented. Opt-in only — must be explicitly requested via `chunking_strategy: "markdown_aware"` in IngestConfig. Default remains `fixed_size`.
+
+**Evaluation (W1 gate):** On a 3-document docs corpus, markdown-aware preserved 5/5 code blocks intact (vs 3/5 fixed-size), produced 96% of chunks with section headings (vs 94%), and matched or exceeded fixed-size on all search metrics. Safe for opt-in deployment on documentation-heavy scopes.
 
 ### Sparse index / hybrid retrieval (BM25 + dense)
 
