@@ -155,7 +155,9 @@ def _chunk_markdown_aware(content: str, max_size: int) -> list[str]:
 
     Break-point priority: heading > code fence > paragraph > list item > newline.
     Preserves semantic units for documentation-heavy corpora.
-    Falls back to fixed-size splitting if no markdown structure is detected.
+
+    Falls back to fixed-size splitting when no markdown structure is detected
+    (i.e., content has no headings and no code fences — only plain paragraphs).
     """
     import re
 
@@ -221,8 +223,11 @@ def _chunk_markdown_aware(content: str, max_size: int) -> list[str]:
     if current_lines:
         blocks.append((current_type, "\n".join(current_lines)))
 
-    # If no blocks were produced (non-markdown content), fall back to fixed-size
-    if not blocks:
+    # Fall back to fixed-size if content has no markdown structure.
+    # "No markdown structure" = no heading_section blocks AND no code_fence blocks.
+    # Pure paragraph blocks mean plain text — markdown-aware adds no value.
+    has_markdown = any(bt in ("heading_section", "code_fence") for bt, _ in blocks)
+    if not blocks or not has_markdown:
         return _chunk_fixed_size(content, max_size, max_size // 8)
 
     # Phase 2: Merge adjacent blocks respecting boundary strength.
