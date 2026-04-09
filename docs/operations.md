@@ -28,33 +28,37 @@ All configuration is injected via environment variables. No config file is read 
 
 ## Health Checks
 
-### Shallow health (liveness probe)
+### Liveness probe
 
 ```
 GET /health
-→ {"status": "ok", "version": "2.0.0", "checks": {"postgres": {"status": "ok"}, "redis": {"status": "ok"}}}
+→ {"status": "ok", "service": "knowledge-api", "version": "1.0.0"}
 ```
 
-Returns 200 if Postgres is reachable. Used by K8s liveness probe.
+Returns 200 unconditionally (no dependency checks). Pure liveness probe — indicates the process is alive. Used by K8s liveness probe. Does **not** check Postgres, Qdrant, Redis, or any upstream dependency.
 
-**Note:** Redis is checked here but not yet used for any runtime path. Check will pass even if Redis is unreachable in current code.
-
-### Deep health (internal, operator use)
+### Internal health (operator use)
 
 ```
 GET /internal/health
 → {
-    "qdrant": {"status": "ok" | "error", "message": "..."},
+    "service": "knowledge-api",
+    "status": "ok" | "degraded",
     "binding_cache": {
-      "status": "ok" | "stale",
       "bot_count": N,
-      "last_reconcile": "ISO8601",
-      "stale_bots": [...]
+      "last_reconcile": 1234567890.12,   ← Unix timestamp (float), not ISO8601
+      "reconcile_interval_secs": 300,
+      "bots": ["bot-a", "bot-b", ...]
+    },
+    "qdrant": "ok" | "error: <message>",  ← flat string, not nested object
+    "proxy_mode": {
+      "knowledge_api_url": "",
+      "internal_token_configured": true
     }
   }
 ```
 
-Returns 200 only if both Qdrant and the binding cache are healthy. Binding cache is considered stale if last reconcile was more than 2× the configured interval ago.
+Returns 200 always (check `status` field for `"degraded"`). Status is `"degraded"` if Qdrant health check throws. Binding cache staleness is not checked in this response — use `bot_count` and `last_reconcile` to assess cache state manually.
 
 This endpoint requires `X-Internal-Token`.
 
@@ -77,26 +81,27 @@ After extraction to this repo, step 1 will be a push to this repo's `dev` branch
 
 ### Binding cache is stale / bots returning 403
 
-1. Check `/internal/health` — look at `binding_cache.stale_bots` and `last_reconcile`
+1. Check `/internal/health` — look at `binding_cache.bot_count` and `binding_cache.last_reconcile` (Unix timestamp). If `last_reconcile` is stale, the cache has not rebuilt recently.
 2. Force a reconcile: `POST /internal/binding-sync` from bot-config-api, or restart the pod
 3. If K8s API is unreachable, the cache cannot rebuild. Check in-cluster service account RBAC (`list` verb on `applications.argoproj.io` in the configured namespace)
 
 ### Qdrant connection errors
 
-1. Check `/internal/health` for Qdrant status
+1. Check `/internal/health` — look at the `qdrant` field (`"ok"` or `"error: <message>"`)
 2. Verify `QDRANT_URL` env var points to correct endpoint
 3. Check Qdrant pod status: `kubectl get pod -n agentopia-dev -l app=qdrant`
-4. Embedding circuit breaker opens after 5 consecutive failures and resets after 30s. Check logs for `circuit_breaker: open` messages
+4. Embedding circuit breaker opens after 5 consecutive failures and resets after 300s (5 minutes). Check logs for `EmbeddingCircuitBreaker: OPEN` messages.
 
-### Dimension mismatch on startup
+### Dimension mismatch (DIMENSION_MISMATCH warning in logs)
 
 ```
-ValueError: Collection {scope} exists with dimension 4096, configured model returns 1536
+DIMENSION_MISMATCH: collection 'kb-<hash>' has dim=4096, config expects dim=1536. Reindex required.
 ```
 
-This means the Qdrant collection was created with a different embedding model. Options:
-1. Reindex the scope: `POST /api/v1/knowledge/{scope}/reindex` — this drops and rebuilds the collection
-2. Change `EMBEDDING_MODEL` back to match the stored dimension (not recommended long-term)
+This is a **warning, not an error**. The service continues to run. Search results on the mismatched collection will be incorrect. Reindex is required:
+
+1. Reindex the scope: `POST /api/v1/knowledge/{scope}/reindex` — drops and rebuilds the Qdrant collection with the correct dimension
+2. Do not change `EMBEDDING_MODEL` to match the old dimension — that masks the problem
 
 ### Ingest silently succeeds but search returns no results
 
