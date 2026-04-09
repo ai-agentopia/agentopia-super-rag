@@ -1,0 +1,282 @@
+{
+  "evaluation": "w1_real_pilot_gate",
+  "timestamp": "2026-04-09T14:53:59Z",
+  "pilot_scope": "joblogic-kb/api-docs",
+  "dataset": "w1_real_pilot.json",
+  "dataset_queries": 10,
+  "documents_loaded": 9,
+  "label_status": "DRAFT \u2014 labels created from document heading analysis. Requires CTO review before use as authoritative gate evidence.",
+  "gate_criteria": "nDCG@5 regression <= 0.01",
+  "gate_passed": false,
+  "gate_reason": "nDCG@5 regressed 0.1131 \u2014 exceeds tolerance (0.01)",
+  "baseline": {
+    "strategy": "fixed_size",
+    "total_chunks": 244,
+    "aggregates": {
+      "ndcg": {
+        "mean": 0.744,
+        "min": 0.0,
+        "max": 1.0,
+        "count": 10
+      },
+      "mrr": {
+        "mean": 0.75,
+        "min": 0.0,
+        "max": 1.0,
+        "count": 10
+      },
+      "precision": {
+        "mean": 0.4,
+        "min": 0.0,
+        "max": 0.8,
+        "count": 10
+      },
+      "recall": {
+        "mean": 1.8,
+        "min": 0.0,
+        "max": 4.0,
+        "count": 10
+      }
+    },
+    "per_query": [
+      {
+        "id": "rp-01",
+        "scenario": "factual_recall",
+        "metrics": {
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.8,
+          "recall": 4.0
+        }
+      },
+      {
+        "id": "rp-02",
+        "scenario": "process_explanation",
+        "metrics": {
+          "ndcg": 0.0,
+          "mrr": 0.0,
+          "precision": 0.0,
+          "recall": 0.0
+        }
+      },
+      {
+        "id": "rp-03",
+        "scenario": "architecture_design",
+        "metrics": {
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.6,
+          "recall": 1.5
+        }
+      },
+      {
+        "id": "rp-04",
+        "scenario": "process_explanation",
+        "metrics": {
+          "ndcg": 0.906,
+          "mrr": 1.0,
+          "precision": 0.6,
+          "recall": 3.0
+        }
+      },
+      {
+        "id": "rp-05",
+        "scenario": "architecture_design",
+        "metrics": {
+          "ndcg": 0.0,
+          "mrr": 0.0,
+          "precision": 0.0,
+          "recall": 0.0
+        }
+      },
+      {
+        "id": "rp-06",
+        "scenario": "protocol_detail",
+        "metrics": {
+          "ndcg": 0.9829,
+          "mrr": 1.0,
+          "precision": 0.8,
+          "recall": 4.0
+        }
+      },
+      {
+        "id": "rp-07",
+        "scenario": "runtime_architecture",
+        "metrics": {
+          "ndcg": 0.6309,
+          "mrr": 0.5,
+          "precision": 0.2,
+          "recall": 0.5
+        }
+      },
+      {
+        "id": "rp-08",
+        "scenario": "requirements_recall",
+        "metrics": {
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.2,
+          "recall": 1.0
+        }
+      },
+      {
+        "id": "rp-09",
+        "scenario": "governance_detail",
+        "metrics": {
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.4,
+          "recall": 2.0
+        }
+      },
+      {
+        "id": "rp-10",
+        "scenario": "security_architecture",
+        "metrics": {
+          "ndcg": 0.9197,
+          "mrr": 1.0,
+          "precision": 0.4,
+          "recall": 2.0
+        }
+      }
+    ]
+  },
+  "candidate": {
+    "strategy": "markdown_aware",
+    "total_chunks": 371,
+    "aggregates": {
+      "ndcg": {
+        "mean": 0.6309,
+        "min": 0.0,
+        "max": 1.0,
+        "count": 10
+      },
+      "mrr": {
+        "mean": 0.6333,
+        "min": 0.0,
+        "max": 1.0,
+        "count": 10
+      },
+      "precision": {
+        "mean": 0.36,
+        "min": 0.0,
+        "max": 0.8,
+        "count": 10
+      },
+      "recall": {
+        "mean": 1.6,
+        "min": 0.0,
+        "max": 4.0,
+        "count": 10
+      }
+    },
+    "per_query": [
+      {
+        "id": "rp-01",
+        "scenario": "factual_recall",
+        "metrics": {
+          "ndcg": 0.9558,
+          "mrr": 1.0,
+          "precision": 0.8,
+          "recall": 4.0
+        }
+      },
+      {
+        "id": "rp-02",
+        "scenario": "process_explanation",
+        "metrics": {
+          "ndcg": 0.0,
+          "mrr": 0.0,
+          "precision": 0.0,
+          "recall": 0.0
+        }
+      },
+      {
+        "id": "rp-03",
+        "scenario": "architecture_design",
+        "metrics": {
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.6,
+          "recall": 1.5
+        }
+      },
+      {
+        "id": "rp-04",
+        "scenario": "process_explanation",
+        "metrics": {
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.4,
+          "recall": 2.0
+        }
+      },
+      {
+        "id": "rp-05",
+        "scenario": "architecture_design",
+        "metrics": {
+          "ndcg": 0.0,
+          "mrr": 0.0,
+          "precision": 0.0,
+          "recall": 0.0
+        }
+      },
+      {
+        "id": "rp-06",
+        "scenario": "protocol_detail",
+        "metrics": {
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.8,
+          "recall": 4.0
+        }
+      },
+      {
+        "id": "rp-07",
+        "scenario": "runtime_architecture",
+        "metrics": {
+          "ndcg": 0.5,
+          "mrr": 0.3333,
+          "precision": 0.2,
+          "recall": 0.5
+        }
+      },
+      {
+        "id": "rp-08",
+        "scenario": "requirements_recall",
+        "metrics": {
+          "ndcg": 0.0,
+          "mrr": 0.0,
+          "precision": 0.0,
+          "recall": 0.0
+        }
+      },
+      {
+        "id": "rp-09",
+        "scenario": "governance_detail",
+        "metrics": {
+          "ndcg": 1.0,
+          "mrr": 1.0,
+          "precision": 0.2,
+          "recall": 1.0
+        }
+      },
+      {
+        "id": "rp-10",
+        "scenario": "security_architecture",
+        "metrics": {
+          "ndcg": 0.8529,
+          "mrr": 1.0,
+          "precision": 0.6,
+          "recall": 3.0
+        }
+      }
+    ]
+  },
+  "deltas": {
+    "nDCG@5": -0.1131,
+    "MRR": -0.1167,
+    "P@5": -0.04,
+    "R@5": -0.2
+  }
+}

@@ -1,0 +1,109 @@
+{
+  "version": "1.0",
+  "phase": "1b",
+  "description": "W1 real pilot-scope golden question set for joblogic-kb/api-docs. Questions target specific sections of real markdown documents currently ingested in the agentopia-dev Qdrant cluster. Relevance labels are source-level because chunk_index depends on chunking strategy.",
+  "grading_scale": {
+    "0": "irrelevant — chunk has no useful information for the query",
+    "1": "partially relevant — chunk contains related but incomplete information",
+    "2": "fully relevant — chunk directly answers or substantially addresses the query"
+  },
+  "pilot_scope": "joblogic-kb/api-docs",
+  "pilot_source": "agentopia-dev Qdrant cluster, 258 chunks across 10 markdown documents",
+  "label_strategy": "source-level: relevance grade assigned per source document. Chunks from the labeled source are graded relevant; others are irrelevant. This allows fair comparison across chunking strategies that produce different chunk counts.",
+  "labeling_status": "DRAFT — labels created from document heading analysis. Requires CTO review before use as authoritative gate evidence.",
+  "wave": "W1 real pilot — 10 queries against joblogic-kb/api-docs production scope",
+  "samples": [
+    {
+      "id": "rp-01",
+      "query": "What are the core services in the Agentopia platform architecture?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "factual_recall",
+      "relevant_sources": [
+        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "Core Services section (H3) directly lists and describes all services"}
+      ]
+    },
+    {
+      "id": "rp-02",
+      "query": "How does bot provisioning work and how are credentials secured?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "process_explanation",
+      "relevant_sources": [
+        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "Bot Provisioning + Token Security sections describe the full pipeline and credential storage"}
+      ]
+    },
+    {
+      "id": "rp-03",
+      "query": "What is the memory architecture and how does scope-based isolation work?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "architecture_design",
+      "relevant_sources": [
+        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "Memory Architecture section describes three-layer system; Scope-Based Isolation subsection explains bot grouping"},
+        {"source": "architecture-multiple-bot.md", "relevance": 1, "reason": "Related multi-bot architecture with scope details"}
+      ]
+    },
+    {
+      "id": "rp-04",
+      "query": "How does the governed PR review workflow operate end-to-end?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "process_explanation",
+      "relevant_sources": [
+        {"source": "governed-pr-review-workflow.md", "relevance": 2, "reason": "How It Works section describes 6-step process; Architecture Summary provides plane separation"}
+      ]
+    },
+    {
+      "id": "rp-05",
+      "query": "What is the dual-lane interaction model and what are the execution boundaries?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "architecture_design",
+      "relevant_sources": [
+        {"source": "overview.md", "relevance": 2, "reason": "Dual-Lane Interaction Model section describes communication vs workflow lanes; Execution Boundaries section lists the three boundaries"}
+      ]
+    },
+    {
+      "id": "rp-06",
+      "query": "How do agents communicate using the A2A thread model?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "protocol_detail",
+      "relevant_sources": [
+        {"source": "a2a-full-design.md", "relevance": 2, "reason": "Thread Model section describes state machine, epoch summaries, turn protocol, session isolation"}
+      ]
+    },
+    {
+      "id": "rp-07",
+      "query": "What is the SA Knowledge Base and how does it inject context at inference time?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "runtime_architecture",
+      "relevant_sources": [
+        {"source": "overview.md", "relevance": 2, "reason": "SA Knowledge Base section describes gateway plugin, scope resolution, XML injection, citation contract"},
+        {"source": "production-sa-knowledge-base.md", "relevance": 1, "reason": "Full production spec with D3 outcome (runtime retrieval architecture)"}
+      ]
+    },
+    {
+      "id": "rp-08",
+      "query": "What are the production acceptance criteria for the SA Knowledge Base?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "requirements_recall",
+      "relevant_sources": [
+        {"source": "production-sa-knowledge-base.md", "relevance": 2, "reason": "Section 10: Production Acceptance Criteria lists 8 criteria including citation, isolation, quality threshold"}
+      ]
+    },
+    {
+      "id": "rp-09",
+      "query": "What human-in-the-loop controls exist in the A2A collaboration system?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "governance_detail",
+      "relevant_sources": [
+        {"source": "a2a-full-design.md", "relevance": 2, "reason": "Human-in-the-Loop section describes checkpoints, approval flow, and guidance mechanisms"}
+      ]
+    },
+    {
+      "id": "rp-10",
+      "query": "What is the reviewer bot's scope of permissions and what can it not do?",
+      "scope": "joblogic-kb/api-docs",
+      "scenario": "security_architecture",
+      "relevant_sources": [
+        {"source": "governed-pr-review-workflow.md", "relevance": 2, "reason": "Reviewer Bot section + What This Is Not section describe scoped permissions and explicit limitations"}
+      ]
+    }
+  ]
+}
