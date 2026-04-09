@@ -7,8 +7,8 @@
   "documents_loaded": 9,
   "label_status": "DRAFT \u2014 labels created from document heading analysis. Requires CTO review before use as authoritative gate evidence.",
   "gate_criteria": "nDCG@5 regression <= 0.01",
-  "gate_passed": false,
-  "gate_reason": "nDCG@5 regressed 0.1131 \u2014 exceeds tolerance (0.01)",
+  "gate_passed": null,
+  "gate_reason": "Provisional negative signal (nDCG@5 -0.1131). NOT an authoritative gate decision \u2014 labels are DRAFT, corpus is partial (9/10 docs), Recall@5 is invalid with source-level grading.",
   "baseline": {
     "strategy": "fixed_size",
     "total_chunks": 244,
@@ -278,5 +278,20 @@
     "MRR": -0.1167,
     "P@5": -0.04,
     "R@5": -0.2
-  }
+  },
+  "evidence_status": "provisional",
+  "limitations": [
+    "DRAFT labels \u2014 not CTO-reviewed",
+    "Partial corpus: 9/10 source documents (ui-knowledge-workflow-trigger.md missing)",
+    "Recall@5 invalid: source-level grading produces R@5 > 1.0",
+    "In-memory cosine search only \u2014 production uses Qdrant embedding-based search"
+  ],
+  "trustworthy_metrics": [
+    "nDCG@5",
+    "MRR",
+    "Precision@5"
+  ],
+  "invalid_metrics": [
+    "Recall@5 \u2014 source-level grading denominator mismatch"
+  ]
 }
