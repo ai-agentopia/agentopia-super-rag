@@ -35,11 +35,15 @@ jobs:
         run: python -c "import sys; assert sys.version_info >= (3, 12), f'Expected Python 3.12+, got {sys.version}'"
 
       - name: Run fast test gate
+        shell: bash
         run: |
           # Exit codes: 0 = all passed, 5 = no tests collected (OK in Phase 1).
           # Any other exit code (1=failures, 2=interrupted, 3=internal error, 4=usage) is a failure.
+          # set +e prevents GitHub Actions default shell from aborting on non-zero exit before rc=$? runs.
+          set +e
           pytest tests/ -m "not integration and not e2e" -x -q --tb=short
           rc=$?
+          set -e
           if [ $rc -eq 0 ] || [ $rc -eq 5 ]; then
             echo "Fast gate passed (rc=$rc). Test count will grow after Phase 2 extraction."
             exit 0

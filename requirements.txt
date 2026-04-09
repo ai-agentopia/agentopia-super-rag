@@ -1,6 +1,6 @@
-# Pinned from agentopia-protocol/knowledge-api freeze commit (2026-04-09).
-# Phase 1: dependency spec is present but service source is not yet extracted.
-# Phase 2 will copy source and validate these pins against the running service.
+# Dependency baseline mirrored from agentopia-protocol/knowledge-api requirements.txt
+# as of freeze commit (2026-04-09). Uses minimum-version constraints (>= ranges),
+# not fully pinned. Phase 2 extraction will validate these against the running service.
 # See docs/migration.md for extraction plan.
 
 fastapi>=0.115.0
