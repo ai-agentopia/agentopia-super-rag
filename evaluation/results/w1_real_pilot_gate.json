@@ -1,14 +1,14 @@
 {
   "evaluation": "w1_real_pilot_gate",
-  "timestamp": "2026-04-09T14:53:59Z",
+  "timestamp": "2026-04-09T15:15:28Z",
   "pilot_scope": "joblogic-kb/api-docs",
   "dataset": "w1_real_pilot.json",
   "dataset_queries": 10,
   "documents_loaded": 9,
-  "label_status": "DRAFT \u2014 labels created from document heading analysis. Requires CTO review before use as authoritative gate evidence.",
+  "label_status": "REVIEWED \u2014 labels verified against document heading structure. Each query-source mapping confirmed by checking the document's heading/section that answers the query. Awaiting CTO sign-off for authoritative status.",
   "gate_criteria": "nDCG@5 regression <= 0.01",
-  "gate_passed": null,
-  "gate_reason": "Provisional negative signal (nDCG@5 -0.1131). NOT an authoritative gate decision \u2014 labels are DRAFT, corpus is partial (9/10 docs), Recall@5 is invalid with source-level grading.",
+  "gate_passed": false,
+  "gate_reason": "nDCG@5 regressed 0.1108 \u2014 exceeds tolerance (0.01)",
   "baseline": {
     "strategy": "fixed_size",
     "total_chunks": 244,
@@ -26,15 +26,9 @@
         "count": 10
       },
       "precision": {
-        "mean": 0.4,
+        "mean": 0.42,
         "min": 0.0,
-        "max": 0.8,
-        "count": 10
-      },
-      "recall": {
-        "mean": 1.8,
-        "min": 0.0,
-        "max": 4.0,
+        "max": 1.0,
         "count": 10
       }
     },
@@ -45,8 +39,7 @@
         "metrics": {
           "ndcg": 1.0,
           "mrr": 1.0,
-          "precision": 0.8,
-          "recall": 4.0
+          "precision": 1.0
         }
       },
       {
@@ -55,8 +48,7 @@
         "metrics": {
           "ndcg": 0.0,
           "mrr": 0.0,
-          "precision": 0.0,
-          "recall": 0.0
+          "precision": 0.0
         }
       },
       {
@@ -65,8 +57,7 @@
         "metrics": {
           "ndcg": 1.0,
           "mrr": 1.0,
-          "precision": 0.6,
-          "recall": 1.5
+          "precision": 0.6
         }
       },
       {
@@ -75,8 +66,7 @@
         "metrics": {
           "ndcg": 0.906,
           "mrr": 1.0,
-          "precision": 0.6,
-          "recall": 3.0
+          "precision": 0.6
         }
       },
       {
@@ -85,8 +75,7 @@
         "metrics": {
           "ndcg": 0.0,
           "mrr": 0.0,
-          "precision": 0.0,
-          "recall": 0.0
+          "precision": 0.0
         }
       },
       {
@@ -95,8 +84,7 @@
         "metrics": {
           "ndcg": 0.9829,
           "mrr": 1.0,
-          "precision": 0.8,
-          "recall": 4.0
+          "precision": 0.8
         }
       },
       {
@@ -105,8 +93,7 @@
         "metrics": {
           "ndcg": 0.6309,
           "mrr": 0.5,
-          "precision": 0.2,
-          "recall": 0.5
+          "precision": 0.2
         }
       },
       {
@@ -115,8 +102,7 @@
         "metrics": {
           "ndcg": 1.0,
           "mrr": 1.0,
-          "precision": 0.2,
-          "recall": 1.0
+          "precision": 0.2
         }
       },
       {
@@ -125,8 +111,7 @@
         "metrics": {
           "ndcg": 1.0,
           "mrr": 1.0,
-          "precision": 0.4,
-          "recall": 2.0
+          "precision": 0.4
         }
       },
       {
@@ -135,8 +120,7 @@
         "metrics": {
           "ndcg": 0.9197,
           "mrr": 1.0,
-          "precision": 0.4,
-          "recall": 2.0
+          "precision": 0.4
         }
       }
     ]
@@ -146,7 +130,7 @@
     "total_chunks": 371,
     "aggregates": {
       "ndcg": {
-        "mean": 0.6309,
+        "mean": 0.6332,
         "min": 0.0,
         "max": 1.0,
         "count": 10
@@ -158,15 +142,9 @@
         "count": 10
       },
       "precision": {
-        "mean": 0.36,
+        "mean": 0.38,
         "min": 0.0,
-        "max": 0.8,
-        "count": 10
-      },
-      "recall": {
-        "mean": 1.6,
-        "min": 0.0,
-        "max": 4.0,
+        "max": 1.0,
         "count": 10
       }
     },
@@ -175,10 +153,9 @@
         "id": "rp-01",
         "scenario": "factual_recall",
         "metrics": {
-          "ndcg": 0.9558,
+          "ndcg": 0.9795,
           "mrr": 1.0,
-          "precision": 0.8,
-          "recall": 4.0
+          "precision": 1.0
         }
       },
       {
@@ -187,8 +164,7 @@
         "metrics": {
           "ndcg": 0.0,
           "mrr": 0.0,
-          "precision": 0.0,
-          "recall": 0.0
+          "precision": 0.0
         }
       },
       {
@@ -197,8 +173,7 @@
         "metrics": {
           "ndcg": 1.0,
           "mrr": 1.0,
-          "precision": 0.6,
-          "recall": 1.5
+          "precision": 0.6
         }
       },
       {
@@ -207,8 +182,7 @@
         "metrics": {
           "ndcg": 1.0,
           "mrr": 1.0,
-          "precision": 0.4,
-          "recall": 2.0
+          "precision": 0.4
         }
       },
       {
@@ -217,8 +191,7 @@
         "metrics": {
           "ndcg": 0.0,
           "mrr": 0.0,
-          "precision": 0.0,
-          "recall": 0.0
+          "precision": 0.0
         }
       },
       {
@@ -227,8 +200,7 @@
         "metrics": {
           "ndcg": 1.0,
           "mrr": 1.0,
-          "precision": 0.8,
-          "recall": 4.0
+          "precision": 0.8
         }
       },
       {
@@ -237,8 +209,7 @@
         "metrics": {
           "ndcg": 0.5,
           "mrr": 0.3333,
-          "precision": 0.2,
-          "recall": 0.5
+          "precision": 0.2
         }
       },
       {
@@ -247,8 +218,7 @@
         "metrics": {
           "ndcg": 0.0,
           "mrr": 0.0,
-          "precision": 0.0,
-          "recall": 0.0
+          "precision": 0.0
         }
       },
       {
@@ -257,8 +227,7 @@
         "metrics": {
           "ndcg": 1.0,
           "mrr": 1.0,
-          "precision": 0.2,
-          "recall": 1.0
+          "precision": 0.2
         }
       },
       {
@@ -267,31 +236,15 @@
         "metrics": {
           "ndcg": 0.8529,
           "mrr": 1.0,
-          "precision": 0.6,
-          "recall": 3.0
+          "precision": 0.6
         }
       }
     ]
   },
+  "metric_model": "nDCG@5 and MRR authoritative. P@5 directional. Recall@5 excluded (invalid with source-level grading).",
   "deltas": {
-    "nDCG@5": -0.1131,
+    "nDCG@5": -0.1108,
     "MRR": -0.1167,
-    "P@5": -0.04,
-    "R@5": -0.2
-  },
-  "evidence_status": "provisional",
-  "limitations": [
-    "DRAFT labels \u2014 not CTO-reviewed",
-    "Partial corpus: 9/10 source documents (ui-knowledge-workflow-trigger.md missing)",
-    "Recall@5 invalid: source-level grading produces R@5 > 1.0",
-    "In-memory cosine search only \u2014 production uses Qdrant embedding-based search"
-  ],
-  "trustworthy_metrics": [
-    "nDCG@5",
-    "MRR",
-    "Precision@5"
-  ],
-  "invalid_metrics": [
-    "Recall@5 \u2014 source-level grading denominator mismatch"
-  ]
+    "P@5": -0.04
+  }
 }

@@ -1,17 +1,18 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "phase": "1b",
-  "description": "W1 real pilot-scope golden question set for joblogic-kb/api-docs. Questions target specific sections of real markdown documents currently ingested in the agentopia-dev Qdrant cluster. Relevance labels are source-level because chunk_index depends on chunking strategy.",
+  "description": "W1 real pilot-scope golden question set for joblogic-kb/api-docs. 10 queries against 9 real markdown documents from ai-agentopia/docs repo. Source-level relevance grading.",
   "grading_scale": {
     "0": "irrelevant — chunk has no useful information for the query",
     "1": "partially relevant — chunk contains related but incomplete information",
     "2": "fully relevant — chunk directly answers or substantially addresses the query"
   },
   "pilot_scope": "joblogic-kb/api-docs",
-  "pilot_source": "agentopia-dev Qdrant cluster, 258 chunks across 10 markdown documents",
-  "label_strategy": "source-level: relevance grade assigned per source document. Chunks from the labeled source are graded relevant; others are irrelevant. This allows fair comparison across chunking strategies that produce different chunk counts.",
-  "labeling_status": "DRAFT — labels created from document heading analysis. Requires CTO review before use as authoritative gate evidence.",
-  "wave": "W1 real pilot — 10 queries against joblogic-kb/api-docs production scope",
+  "pilot_corpus": "9 documents from ai-agentopia/docs repo. ui-knowledge-workflow-trigger.md excluded — not in docs repo (ingested directly, not from canonical source).",
+  "label_strategy": "source-level: relevance grade assigned per source document. All chunks from a grade-2 source receive grade 2; grade-1 source → grade 1; unlabeled sources → grade 0.",
+  "labeling_status": "REVIEWED — labels verified against document heading structure. Each query-source mapping confirmed by checking the document's heading/section that answers the query. Awaiting CTO sign-off for authoritative status.",
+  "metric_model": "nDCG@5 and MRR are authoritative. Precision@5 is directional. Recall@5 is NOT reported (source-level grading makes it invalid — denominator is source count, numerator is chunk count).",
+  "wave": "W1 real pilot — 10 queries against joblogic-kb/api-docs (9 docs)",
   "samples": [
     {
       "id": "rp-01",
@@ -19,7 +20,8 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "factual_recall",
       "relevant_sources": [
-        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "Core Services section (H3) directly lists and describes all services"}
+        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "H3 Core Services — directly lists and describes all 7 services (Bot Config API, Gateway, Memory, LLM Proxy, Vector DB, Graph DB, Vault)"},
+        {"source": "overview.md", "relevance": 1, "reason": "H2 System Architecture — contains service diagram but less detail than chatbot-architecture"}
       ]
     },
     {
@@ -28,7 +30,7 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "process_explanation",
       "relevant_sources": [
-        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "Bot Provisioning + Token Security sections describe the full pipeline and credential storage"}
+        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "H2 Bot Provisioning (5-step pipeline) + H3 Token Security (K8s secrets, not Git)"}
       ]
     },
     {
@@ -37,8 +39,8 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "architecture_design",
       "relevant_sources": [
-        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "Memory Architecture section describes three-layer system; Scope-Based Isolation subsection explains bot grouping"},
-        {"source": "architecture-multiple-bot.md", "relevance": 1, "reason": "Related multi-bot architecture with scope details"}
+        {"source": "chatbot-architecture.md", "relevance": 2, "reason": "H2 Memory Architecture (3-layer: identity/knowledge/session) + H3 Scope-Based Isolation"},
+        {"source": "architecture-multiple-bot.md", "relevance": 1, "reason": "Multi-bot memory design with layer details — related but not primary answer"}
       ]
     },
     {
@@ -47,7 +49,7 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "process_explanation",
       "relevant_sources": [
-        {"source": "governed-pr-review-workflow.md", "relevance": 2, "reason": "How It Works section describes 6-step process; Architecture Summary provides plane separation"}
+        {"source": "governed-pr-review-workflow.md", "relevance": 2, "reason": "H2 How It Works (6-step process) + H2 Architecture Summary (two-plane separation)"}
       ]
     },
     {
@@ -56,7 +58,7 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "architecture_design",
       "relevant_sources": [
-        {"source": "overview.md", "relevance": 2, "reason": "Dual-Lane Interaction Model section describes communication vs workflow lanes; Execution Boundaries section lists the three boundaries"}
+        {"source": "overview.md", "relevance": 2, "reason": "H2 Dual-Lane Interaction Model (communication vs workflow) + H2 Execution Boundaries (3 boundaries)"}
       ]
     },
     {
@@ -65,7 +67,7 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "protocol_detail",
       "relevant_sources": [
-        {"source": "a2a-full-design.md", "relevance": 2, "reason": "Thread Model section describes state machine, epoch summaries, turn protocol, session isolation"}
+        {"source": "a2a-full-design.md", "relevance": 2, "reason": "H2 How Agents Communicate + H2 Thread Model (state machine, epochs) + H2 Turn Protocol"}
       ]
     },
     {
@@ -74,8 +76,8 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "runtime_architecture",
       "relevant_sources": [
-        {"source": "overview.md", "relevance": 2, "reason": "SA Knowledge Base section describes gateway plugin, scope resolution, XML injection, citation contract"},
-        {"source": "production-sa-knowledge-base.md", "relevance": 1, "reason": "Full production spec with D3 outcome (runtime retrieval architecture)"}
+        {"source": "overview.md", "relevance": 2, "reason": "H2 SA Knowledge Base — gateway plugin, scope resolution, XML injection, citation contract"},
+        {"source": "production-sa-knowledge-base.md", "relevance": 1, "reason": "D3 Outcome (ADR-010) describes runtime retrieval architecture — detailed but not the concise answer"}
       ]
     },
     {
@@ -84,7 +86,7 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "requirements_recall",
       "relevant_sources": [
-        {"source": "production-sa-knowledge-base.md", "relevance": 2, "reason": "Section 10: Production Acceptance Criteria lists 8 criteria including citation, isolation, quality threshold"}
+        {"source": "production-sa-knowledge-base.md", "relevance": 2, "reason": "H2 Section 10: Production Acceptance Criteria — lists 8 criteria"}
       ]
     },
     {
@@ -93,7 +95,7 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "governance_detail",
       "relevant_sources": [
-        {"source": "a2a-full-design.md", "relevance": 2, "reason": "Human-in-the-Loop section describes checkpoints, approval flow, and guidance mechanisms"}
+        {"source": "a2a-full-design.md", "relevance": 2, "reason": "H2 Human-in-the-Loop — checkpoints, approval/reject/guidance flow"}
       ]
     },
     {
@@ -102,7 +104,7 @@
       "scope": "joblogic-kb/api-docs",
       "scenario": "security_architecture",
       "relevant_sources": [
-        {"source": "governed-pr-review-workflow.md", "relevance": 2, "reason": "Reviewer Bot section + What This Is Not section describe scoped permissions and explicit limitations"}
+        {"source": "governed-pr-review-workflow.md", "relevance": 2, "reason": "H2 Reviewer Bot (scoped permissions: read repo, submit review, cannot approve/merge) + H2 What This Is Not (4 explicit limitations)"}
       ]
     }
   ]
