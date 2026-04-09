@@ -1,26 +1,30 @@
 name: Build Image
 
-# IMAGE PUSH IS GATED — agentopia-super-rag#24 (atomic cutover)
+# CUTOVER STEP 1 — agentopia-super-rag#24
 #
-# This workflow MUST remain workflow_dispatch only until Phase 3 cutover
-# sequence is explicitly initiated. Enabling push trigger before cutover
-# creates two publishers for ghcr.io/ai-agentopia/knowledge-api, which
-# violates the single-publisher rule (docs/migration.md).
+# agentopia-super-rag is a main-only repo. No dev/uat branches.
+# Images are published on push to main.
 #
-# Phase 3 cutover sequence (agentopia-super-rag#24):
-#   Step 1: Switch this workflow to push trigger on dev branch
-#   Step 2: Verify first successful dev-{sha} push
-#   Step 3: Switch ArgoCD Image Updater (agentopia-infra#113)
-#   Step 4: Disable monorepo image push (agentopia-protocol#389)
+# This is the Phase 3 atomic cutover Step 1 workflow.
+# It pushes dev-{sha} tags to ghcr.io/ai-agentopia/knowledge-api from this repo.
+#
+# Merge preconditions (all required before merging this PR):
+#   1. agentopia-super-rag#11 (C4 contract audit) closed with CTO sign-off
+#   2. agentopia-super-rag#5 (B2) GHCR write permission confirmed
+#   3. GHCR old tags from agentopia-protocol confirmed retained (rollback depends on them)
+#
+# Post-merge sequence (must follow in order):
+#   Step 1 (this PR): push trigger live — first push to main produces dev-{sha}
+#   Step 2: verify first push in GHCR before proceeding
+#   Step 3: disable old publisher (agentopia-protocol#389) in same deploy window
+#   Step 4: verify ArgoCD rollout + /health 200
 
 on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      push_image:
-        description: "Push to GHCR (ONLY use after Phase 3 cutover — agentopia-super-rag#24)"
-        required: false
-        default: "false"
-        type: string
 
 permissions:
   contents: read
@@ -35,23 +39,22 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Cutover gate check
-        run: |
-          if [ "${{ inputs.push_image }}" = "true" ]; then
-            echo "ERROR: Image push is gated by atomic cutover (agentopia-super-rag#24)."
-            echo "Do not push until Phase 3 cutover sequence is explicitly initiated."
-            exit 1
-          fi
-          echo "Build-only mode: image will be built but not pushed to GHCR."
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Build image (no push)
-        uses: docker/build-push-action@v5
+      - name: Log in to GHCR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
         with:
           context: .
-          push: false
+          push: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
           tags: ghcr.io/ai-agentopia/knowledge-api:dev-${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
