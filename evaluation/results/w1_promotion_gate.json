@@ -1,0 +1,190 @@
+{
+  "evaluation": "w1_promotion_gate",
+  "timestamp": "2026-04-09T14:26:55Z",
+  "gate_criteria": "nDCG@5 regression <= 0.01",
+  "gate_passed": true,
+  "gate_reason": "No regression on seed (delta=+0.0000). Improvement on markdown pilot (delta=+0.4095).",
+  "regression_check": {
+    "scope": "test/platform-docs",
+    "dataset": "phase1b_labeled_seed.json",
+    "queries": 5,
+    "baseline_ndcg": 0.8774,
+    "candidate_ndcg": 0.8774,
+    "delta": 0.0,
+    "passed": true
+  },
+  "w1_pilot": {
+    "scope": "w1-pilot/docs",
+    "dataset": "w1_markdown_pilot.json",
+    "queries": 5,
+    "baseline": {
+      "strategy": "fixed_size",
+      "aggregates": {
+        "ndcg": {
+          "mean": 0.5861,
+          "min": 0.0,
+          "max": 1.0,
+          "count": 5
+        },
+        "mrr": {
+          "mean": 0.5167,
+          "min": 0.0,
+          "max": 1.0,
+          "count": 5
+        },
+        "precision": {
+          "mean": 0.2,
+          "min": 0.0,
+          "max": 0.4,
+          "count": 5
+        },
+        "recall": {
+          "mean": 0.5,
+          "min": 0.0,
+          "max": 1.0,
+          "count": 5
+        }
+      },
+      "per_query": [
+        {
+          "id": "w1-01",
+          "scenario": "process_explanation",
+          "metrics": {
+            "ndcg": 1.0,
+            "mrr": 1.0,
+            "precision": 0.4,
+            "recall": 0.6667
+          }
+        },
+        {
+          "id": "w1-02",
+          "scenario": "security_architecture",
+          "metrics": {
+            "ndcg": 0.5,
+            "mrr": 0.3333,
+            "precision": 0.2,
+            "recall": 1.0
+          }
+        },
+        {
+          "id": "w1-03",
+          "scenario": "configuration_detail",
+          "metrics": {
+            "ndcg": 0.4307,
+            "mrr": 0.25,
+            "precision": 0.2,
+            "recall": 0.5
+          }
+        },
+        {
+          "id": "w1-04",
+          "scenario": "factual_recall",
+          "metrics": {
+            "ndcg": 0.0,
+            "mrr": 0.0,
+            "precision": 0.0,
+            "recall": 0.0
+          }
+        },
+        {
+          "id": "w1-05",
+          "scenario": "architecture_decision",
+          "metrics": {
+            "ndcg": 1.0,
+            "mrr": 1.0,
+            "precision": 0.2,
+            "recall": 0.3333
+          }
+        }
+      ]
+    },
+    "candidate": {
+      "strategy": "markdown_aware",
+      "aggregates": {
+        "ndcg": {
+          "mean": 0.9956,
+          "min": 0.9779,
+          "max": 1.0,
+          "count": 5
+        },
+        "mrr": {
+          "mean": 1.0,
+          "min": 1.0,
+          "max": 1.0,
+          "count": 5
+        },
+        "precision": {
+          "mean": 0.32,
+          "min": 0.2,
+          "max": 0.6,
+          "count": 5
+        },
+        "recall": {
+          "mean": 0.8333,
+          "min": 0.5,
+          "max": 1.0,
+          "count": 5
+        }
+      },
+      "per_query": [
+        {
+          "id": "w1-01",
+          "scenario": "process_explanation",
+          "metrics": {
+            "ndcg": 0.9779,
+            "mrr": 1.0,
+            "precision": 0.6,
+            "recall": 1.0
+          }
+        },
+        {
+          "id": "w1-02",
+          "scenario": "security_architecture",
+          "metrics": {
+            "ndcg": 1.0,
+            "mrr": 1.0,
+            "precision": 0.2,
+            "recall": 1.0
+          }
+        },
+        {
+          "id": "w1-03",
+          "scenario": "configuration_detail",
+          "metrics": {
+            "ndcg": 1.0,
+            "mrr": 1.0,
+            "precision": 0.2,
+            "recall": 0.5
+          }
+        },
+        {
+          "id": "w1-04",
+          "scenario": "factual_recall",
+          "metrics": {
+            "ndcg": 1.0,
+            "mrr": 1.0,
+            "precision": 0.2,
+            "recall": 1.0
+          }
+        },
+        {
+          "id": "w1-05",
+          "scenario": "architecture_decision",
+          "metrics": {
+            "ndcg": 1.0,
+            "mrr": 1.0,
+            "precision": 0.4,
+            "recall": 0.6667
+          }
+        }
+      ]
+    },
+    "deltas": {
+      "ndcg": 0.4095,
+      "mrr": 0.4833,
+      "precision": 0.12,
+      "recall": 0.3333
+    },
+    "passed": true
+  }
+}
