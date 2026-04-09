@@ -1,0 +1,325 @@
+{
+  "version": "2.0",
+  "phase": "1b",
+  "wave": "2 — pilot corpus (#307). 25 queries against production agentopia-architecture scope. Chunk indices verified from live Qdrant. Labels assigned by engineer review of text_preview + section.",
+  "description": "Wave 2 labeled evaluation dataset for #307 SA-KB pilot verification. Uses production pilot corpus (20 docs, 485 chunks). Labels: 2=fully relevant, 1=partially relevant, 0=irrelevant (unjudged defaults to 0).",
+  "scope": "agentopia-architecture",
+  "grading_scale": {
+    "0": "irrelevant — chunk has no useful information for the query",
+    "1": "partially relevant — chunk contains related but incomplete information",
+    "2": "fully relevant — chunk directly answers or substantially addresses the query"
+  },
+  "corpus_stats": {
+    "scope": "agentopia-architecture",
+    "document_count": 20,
+    "chunk_count": 485,
+    "ingested_date": "2026-04-01"
+  },
+  "samples": [
+    {
+      "id": "w2q01",
+      "query": "What services make up the agentopia platform?",
+      "scope": "agentopia-architecture",
+      "scenario": "factual_recall",
+      "relevant_chunks": [
+        {"source": "bot-config-api.md", "chunk_index": 0, "relevance": 2, "reason": "Bot Management section — describes central API server as core platform service"},
+        {"source": "chatbot-architecture.md", "chunk_index": 0, "relevance": 2, "reason": "Platform Architecture overview — directly introduces all services"},
+        {"source": "a2a-full-design.md", "chunk_index": 0, "relevance": 1, "reason": "A2A protocol intro — describes one service's role but not full platform"},
+        {"source": "chatbot-architecture.md", "chunk_index": 17, "relevance": 1, "reason": "Platform Roadmap — mentions services expanding"},
+        {"source": "a2a-solution-protocol.md", "chunk_index": 0, "relevance": 1, "reason": "A2A Solution Protocol doc intro — partial platform context"}
+      ]
+    },
+    {
+      "id": "w2q02",
+      "query": "How does memory work in agentopia bots?",
+      "scope": "agentopia-architecture",
+      "scenario": "factual_recall",
+      "relevant_chunks": [
+        {"source": "chatbot-architecture.md", "chunk_index": 8, "relevance": 2, "reason": "Memory Architecture section — directly explains 3-layer memory system"},
+        {"source": "mem0-api.md", "chunk_index": 0, "relevance": 2, "reason": "Semantic Memory System intro — explains how mem0 memory works"},
+        {"source": "architecture-multiple-bot.md", "chunk_index": 2, "relevance": 2, "reason": "Memory Architecture section in multi-bot design — shared memory layer"},
+        {"source": "mem0-api.md", "chunk_index": 4, "relevance": 1, "reason": "Gateway Integration section — explains memory API integration, partial detail"}
+      ]
+    },
+    {
+      "id": "w2q03",
+      "query": "What is the role of mem0-api in the system?",
+      "scope": "agentopia-architecture",
+      "scenario": "architecture",
+      "relevant_chunks": [
+        {"source": "production-sa-knowledge-base.md", "chunk_index": 4, "relevance": 1, "reason": "Memory System (mem0-api) section — describes mem0 role but as contrast to knowledge system"},
+        {"source": "010-sa-kb-runtime-retrieval-architecture.md", "chunk_index": 2, "relevance": 1, "reason": "Mentions mem0 plugin pattern — partial role explanation"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 10, "relevance": 1, "reason": "Memory System comparison table — mentions mem0 in context of RAG blueprint"}
+      ]
+    },
+    {
+      "id": "w2q04",
+      "query": "How does A2A agent-to-agent communication work?",
+      "scope": "agentopia-architecture",
+      "scenario": "architecture",
+      "relevant_chunks": [
+        {"source": "a2a-full-design.md", "chunk_index": 0, "relevance": 2, "reason": "A2A Protocol intro — directly describes how agents communicate"},
+        {"source": "a2a-full-design.md", "chunk_index": 1, "relevance": 2, "reason": "Agents communicate section — explains communication mechanisms"},
+        {"source": "a2a-full-design.md", "chunk_index": 18, "relevance": 2, "reason": "A2A diagram — shows agent communication flow visually"},
+        {"source": "overview.md", "chunk_index": 23, "relevance": 1, "reason": "Further Reading — mentions A2A structured protocols"},
+        {"source": "a2a-full-design.md", "chunk_index": 17, "relevance": 1, "reason": "A2A and Tool Integration — partial communication details"}
+      ]
+    },
+    {
+      "id": "w2q05",
+      "query": "What is the bot provisioning flow?",
+      "scope": "agentopia-architecture",
+      "scenario": "architecture",
+      "relevant_chunks": [
+        {"source": "bot-config-api.md", "chunk_index": 1, "relevance": 2, "reason": "AI-Powered Provisioning section — describes provisioning pipeline"},
+        {"source": "chatbot-architecture.md", "chunk_index": 5, "relevance": 2, "reason": "Bot Provisioning section — lists provisioning flow steps"},
+        {"source": "architecture-multiple-bot.md", "chunk_index": 11, "relevance": 2, "reason": "Adding a New Bot section — step-by-step provisioning process"},
+        {"source": "environment-migration.md", "chunk_index": 12, "relevance": 2, "reason": "Bot Deploy Flow (detailed) — detailed flow with all steps"}
+      ]
+    },
+    {
+      "id": "w2q06",
+      "query": "How does the gateway connect to Telegram?",
+      "scope": "agentopia-architecture",
+      "scenario": "architecture",
+      "relevant_chunks": [
+        {"source": "chatbot-architecture.md", "chunk_index": 4, "relevance": 2, "reason": "Core Services section — shows Telegram channel connection in architecture diagram"},
+        {"source": "chatbot-architecture.md", "chunk_index": 11, "relevance": 1, "reason": "Plugin System — lists Telegram as supported channel with plugin details"},
+        {"source": "chatbot-architecture.md", "chunk_index": 3, "relevance": 1, "reason": "Cluster diagram — shows BotA/BotB connecting to channels"},
+        {"source": "fresh-deploy.md", "chunk_index": 10, "relevance": 1, "reason": "Per-bot Telegram token section — Telegram token configuration"}
+      ]
+    },
+    {
+      "id": "w2q07",
+      "query": "What LLM providers are supported?",
+      "scope": "agentopia-architecture",
+      "scenario": "config_detail",
+      "relevant_chunks": [
+        {"source": "chatbot-architecture.md", "chunk_index": 14, "relevance": 2, "reason": "LLM Proxy section — describes provider routing (Anthropic, OpenAI, etc.)"},
+        {"source": "chatbot-architecture.md", "chunk_index": 5, "relevance": 1, "reason": "Bot Provisioning — mentions LLM Proxy routes to multiple LLM providers"},
+        {"source": "architecture-multiple-bot.md", "chunk_index": 12, "relevance": 2, "reason": "Model Flexibility section — lists supported providers"}
+      ]
+    },
+    {
+      "id": "w2q08",
+      "query": "How is the relay token used for authentication?",
+      "scope": "agentopia-architecture",
+      "scenario": "config_detail",
+      "relevant_chunks": [
+        {"source": "010-sa-kb-runtime-retrieval-architecture.md", "chunk_index": 12, "relevance": 2, "reason": "Describes relay token auth with constant-time compare — directly answers"},
+        {"source": "010-sa-kb-runtime-retrieval-architecture.md", "chunk_index": 11, "relevance": 2, "reason": "Per-bot AGENTOPIA_RELAY_TOKEN as bearer + X-Bot-Name — core auth spec"},
+        {"source": "010-sa-kb-runtime-retrieval-architecture.md", "chunk_index": 16, "relevance": 2, "reason": "Consequences — compares token auth options, explains relay token choice"},
+        {"source": "production-sa-knowledge-base.md", "chunk_index": 22, "relevance": 2, "reason": "Per-bot relay token bearer + X-Bot-Name header — auth contract"},
+        {"source": "bot-config-api.md", "chunk_index": 14, "relevance": 1, "reason": "Authentication section — general bearer token auth description"}
+      ]
+    },
+    {
+      "id": "w2q09",
+      "query": "How are bot deployments managed via ArgoCD?",
+      "scope": "agentopia-architecture",
+      "scenario": "process",
+      "relevant_chunks": [
+        {"source": "bot-config-api.md", "chunk_index": 13, "relevance": 2, "reason": "ArgoCD reconciliation, zero-trust token handling in bot management"},
+        {"source": "environment-migration.md", "chunk_index": 2, "relevance": 2, "reason": "Per-Environment Files — bot deploy/delete through ArgoCD GitOps"},
+        {"source": "fresh-deploy.md", "chunk_index": 6, "relevance": 2, "reason": "Step 3: Apply ArgoCD Application — deployment steps"},
+        {"source": "chatbot-architecture.md", "chunk_index": 15, "relevance": 2, "reason": "GitOps and Deployment section — ArgoCD-based deployment architecture"},
+        {"source": "environment-migration.md", "chunk_index": 7, "relevance": 1, "reason": "Phase 2: ArgoCD — installation and setup steps"}
+      ]
+    },
+    {
+      "id": "w2q10",
+      "query": "What happens when a bot is deleted?",
+      "scope": "agentopia-architecture",
+      "scenario": "process",
+      "relevant_chunks": [
+        {"source": "environment-migration.md", "chunk_index": 13, "relevance": 2, "reason": "Bot Delete Flow (detailed) — exact sequence of delete steps"},
+        {"source": "environment-migration.md", "chunk_index": 14, "relevance": 2, "reason": "Continuation of Bot Delete Flow — git + ArgoCD cascade steps"},
+        {"source": "environment-migration.md", "chunk_index": 15, "relevance": 1, "reason": "Common Gotchas — mentions PVC retained after bot deletion"}
+      ]
+    },
+    {
+      "id": "w2q11",
+      "query": "How does knowledge retrieval injection work in the LLM prompt?",
+      "scope": "agentopia-architecture",
+      "scenario": "rag_arch",
+      "relevant_chunks": [
+        {"source": "overview.md", "chunk_index": 15, "relevance": 2, "reason": "Scope isolation — knowledge-retrieval plugin queries bot-config-api and injects into prompt"},
+        {"source": "production-sa-knowledge-base.md", "chunk_index": 6, "relevance": 2, "reason": "Program Objective — describes plugin injecting knowledge into LLM prompt"},
+        {"source": "010-sa-kb-runtime-retrieval-architecture.md", "chunk_index": 4, "relevance": 2, "reason": "knowledge-retrieval extension with before_agent_start hook — core injection mechanism"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 3, "relevance": 2, "reason": "Non-tool-based injection always injects if results found — design rationale"},
+        {"source": "010-sa-kb-runtime-retrieval-architecture.md", "chunk_index": 9, "relevance": 2, "reason": "Injection Format section — XML format, error handling, non-negotiable rules"}
+      ]
+    },
+    {
+      "id": "w2q12",
+      "query": "What chunking strategies are available for documents?",
+      "scope": "agentopia-architecture",
+      "scenario": "rag_arch",
+      "relevant_chunks": [
+        {"source": "012-sa-kb-ingestion-model-document-lifecycle.md", "chunk_index": 15, "relevance": 2, "reason": "Alternatives Considered — lists all chunking strategies: fixed-size, paragraph, code-aware"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 6, "relevance": 2, "reason": "RAG System Data Ingestion — chunking: code-aware, semantic (not implemented)"},
+        {"source": "012-sa-kb-ingestion-model-document-lifecycle.md", "chunk_index": 14, "relevance": 1, "reason": "Staleness Handling — mentions chunk-level staleness detection"},
+        {"source": "production-sa-knowledge-base.md", "chunk_index": 31, "relevance": 1, "reason": "Staleness per document — references chunking metadata"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 5, "relevance": 1, "reason": "RAG System Data Ingestion overview — partial chunking context"}
+      ]
+    },
+    {
+      "id": "w2q13",
+      "query": "How does hybrid search combine dense and sparse retrieval?",
+      "scope": "agentopia-architecture",
+      "scenario": "rag_arch",
+      "relevant_chunks": [
+        {"source": "super-rag-blueprint.md", "chunk_index": 25, "relevance": 2, "reason": "R2.2 Hybrid search — dense + sparse prefetch → RRF fusion spec"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 26, "relevance": 2, "reason": "Retrieval flow after Phase 2 — hybrid search pipeline diagram"},
+        {"source": "mem0-api.md", "chunk_index": 8, "relevance": 1, "reason": "Hybrid retrieval mentioned in mem0 context — partial overlap"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 7, "relevance": 1, "reason": "RAG System Retrieval Strategy — dense vs hybrid comparison table"}
+      ]
+    },
+    {
+      "id": "w2q14",
+      "query": "What is the confidence threshold for knowledge retrieval?",
+      "scope": "agentopia-architecture",
+      "scenario": "rag_arch",
+      "relevant_chunks": [
+        {"source": "014-sa-kb-quality-evaluation-answer-contract.md", "chunk_index": 3, "relevance": 2, "reason": "Evaluation method and threshold table — directly answers threshold criteria"},
+        {"source": "010-sa-kb-runtime-retrieval-architecture.md", "chunk_index": 4, "relevance": 1, "reason": "knowledge-retrieval config — mentions threshold params"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 22, "relevance": 1, "reason": "Evaluation quality section — threshold context"}
+      ]
+    },
+    {
+      "id": "w2q15",
+      "query": "How are knowledge scopes assigned to bots?",
+      "scope": "agentopia-architecture",
+      "scenario": "rag_arch",
+      "relevant_chunks": [
+        {"source": "009-sa-kb-governance-security-compliance.md", "chunk_index": 6, "relevance": 2, "reason": "Bot assigned client_id + knowledge_scopes list at deploy time — direct answer"},
+        {"source": "production-sa-knowledge-base.md", "chunk_index": 21, "relevance": 2, "reason": "Scope resolution from bot registration — system resolves scopes from bot identity"},
+        {"source": "008-sa-kb-product-boundary-tenancy-isolation.md", "chunk_index": 13, "relevance": 2, "reason": "client_id/scope_name format + subscription resolution — scope assignment model"},
+        {"source": "overview.md", "chunk_index": 16, "relevance": 2, "reason": "Scope isolation — knowledge scoped per client, bot subscribes to specific scopes"},
+        {"source": "009-sa-kb-governance-security-compliance.md", "chunk_index": 4, "relevance": 1, "reason": "Scope creation auth — RBAC for scope operations"}
+      ]
+    },
+    {
+      "id": "w2q16",
+      "query": "What is the delivery workflow and how does it execute?",
+      "scope": "agentopia-architecture",
+      "scenario": "workflow",
+      "relevant_chunks": [
+        {"source": "overview.md", "chunk_index": 8, "relevance": 2, "reason": "Delivery Lifecycle — sidecar execution boundary, delivery task flow"},
+        {"source": "overview.md", "chunk_index": 7, "relevance": 2, "reason": "Delivery start boundary — authorized workflow dispatch, code-modifying ops"},
+        {"source": "a2a-solution-protocol.md", "chunk_index": 35, "relevance": 2, "reason": "DeliveryWorkflow Temporal sequence diagram — exact execution flow"},
+        {"source": "bot-config-api.md", "chunk_index": 6, "relevance": 2, "reason": "Delivery Orchestration — human review checkpoints, idempotent turns"},
+        {"source": "bot-config-api.md", "chunk_index": 7, "relevance": 1, "reason": "Role-based access in workflow — partial execution context"}
+      ]
+    },
+    {
+      "id": "w2q17",
+      "query": "How does the governance bridge work?",
+      "scope": "agentopia-architecture",
+      "scenario": "workflow",
+      "relevant_chunks": [
+        {"source": "a2a-solution-protocol.md", "chunk_index": 13, "relevance": 1, "reason": "Governance execution service in architecture table — partial context"},
+        {"source": "a2a-solution-protocol.md", "chunk_index": 27, "relevance": 1, "reason": "Governance Service (GitHub operations) in infrastructure diagram"},
+        {"source": "a2a-solution-protocol.md", "chunk_index": 9, "relevance": 1, "reason": "What Is Already Real — workflow commands and governance state-machine"},
+        {"source": "a2a-full-design.md", "chunk_index": 2, "relevance": 1, "reason": "Agent Discovery — bridge notifications mentioned"}
+      ]
+    },
+    {
+      "id": "w2q18",
+      "query": "What are the roles in the workflow system?",
+      "scope": "agentopia-architecture",
+      "scenario": "workflow",
+      "relevant_chunks": [
+        {"source": "bot-config-api.md", "chunk_index": 7, "relevance": 2, "reason": "Role-based access — delivery processes across bot teams, roles explained"},
+        {"source": "overview.md", "chunk_index": 21, "relevance": 2, "reason": "Layer owner — domain state, governance enforcement — role definition"},
+        {"source": "overview.md", "chunk_index": 9, "relevance": 2, "reason": "Participant list: WF (Workflow Engine), PLAN (AI Planner), DEV (Worker), QA (Reviewer)"},
+        {"source": "a2a-solution-protocol.md", "chunk_index": 13, "relevance": 1, "reason": "Workflow command + governance architecture by role"},
+        {"source": "a2a-solution-protocol.md", "chunk_index": 8, "relevance": 1, "reason": "Workflow API interaction diagram showing roles"}
+      ]
+    },
+    {
+      "id": "w2q19",
+      "query": "How are API keys stored and retrieved from Vault?",
+      "scope": "agentopia-architecture",
+      "scenario": "security",
+      "relevant_chunks": [
+        {"source": "fresh-deploy.md", "chunk_index": 9, "relevance": 2, "reason": "Terminal 2: seed keys — Vault port-forward + seeding API keys"},
+        {"source": "fresh-deploy.md", "chunk_index": 8, "relevance": 1, "reason": "Wait for pods — vault port-forward setup"},
+        {"source": "bot-config-api.md", "chunk_index": 9, "relevance": 1, "reason": "Secure storage — credentials stored as platform secrets"},
+        {"source": "fresh-deploy.md", "chunk_index": 4, "relevance": 1, "reason": "Secrets table — lists which keys go to which secrets"}
+      ]
+    },
+    {
+      "id": "w2q20",
+      "query": "What authentication methods are used between services?",
+      "scope": "agentopia-architecture",
+      "scenario": "security",
+      "relevant_chunks": [
+        {"source": "bot-config-api.md", "chunk_index": 14, "relevance": 2, "reason": "Authentication section — bearer tokens for mutating API operations"},
+        {"source": "009-sa-kb-governance-security-compliance.md", "chunk_index": 2, "relevance": 2, "reason": "Auth model with session, admin guards — inter-service auth types"},
+        {"source": "architecture-multiple-bot.md", "chunk_index": 14, "relevance": 1, "reason": "Credential elimination — cloud credentials and auth patterns"},
+        {"source": "009-sa-kb-governance-security-compliance.md", "chunk_index": 14, "relevance": 1, "reason": "Alternatives Considered for auth — why current approach was chosen"},
+        {"source": "bot-config-api.md", "chunk_index": 13, "relevance": 1, "reason": "Zero-trust token handling — ArgoCD + zero-trust patterns"}
+      ]
+    },
+    {
+      "id": "w2q21",
+      "query": "What is the difference between mem0 memory and file memory?",
+      "scope": "agentopia-architecture",
+      "scenario": "memory_arch",
+      "relevant_chunks": [
+        {"source": "super-rag-blueprint.md", "chunk_index": 10, "relevance": 1, "reason": "Memory System blueprint table — episodic vs semantic memory types"},
+        {"source": "production-sa-knowledge-base.md", "chunk_index": 4, "relevance": 1, "reason": "Memory System (mem0-api) section — contrasts with knowledge system"},
+        {"source": "architecture-multiple-bot.md", "chunk_index": 2, "relevance": 1, "reason": "Memory Architecture — shared memory layer with vector + graph stores"},
+        {"source": "mem0-api.md", "chunk_index": 6, "relevance": 1, "reason": "Memory Scoping — mem0 configuration and relevance scoring"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 11, "relevance": 1, "reason": "Tooling Layer — mem0-api → Neo4j entity graph vs short-term storage"}
+      ]
+    },
+    {
+      "id": "w2q22",
+      "query": "How does context pruning work when the context window fills up?",
+      "scope": "agentopia-architecture",
+      "scenario": "memory_arch",
+      "relevant_chunks": [
+        {"source": "a2a-full-design.md", "chunk_index": 15, "relevance": 2, "reason": "Context Compaction section — how conversations grow and are pruned"},
+        {"source": "010-sa-kb-runtime-retrieval-architecture.md", "chunk_index": 8, "relevance": 1, "reason": "Budget enforcement: drop lowest-scoring chunks if total exceeds maxContextTokens"}
+      ]
+    },
+    {
+      "id": "w2q23",
+      "query": "What improvements does super-RAG Phase 2 bring over Phase 1?",
+      "scope": "agentopia-architecture",
+      "scenario": "super_rag",
+      "relevant_chunks": [
+        {"source": "super-rag-blueprint.md", "chunk_index": 39, "relevance": 2, "reason": "Success Criteria — Phase 2 improvement goals over baseline"},
+        {"source": "production-super-rag.md", "chunk_index": 2, "relevance": 2, "reason": "Related Docs — phases overview including Phase 2 improvements"},
+        {"source": "super-rag-blueprint.md", "chunk_index": 20, "relevance": 2, "reason": "Super RAG Upgrade Plan — Phased Approach — Phase 1 vs Phase 2 goals"},
+        {"source": "production-sa-knowledge-base.md", "chunk_index": 56, "relevance": 1, "reason": "Next: Super RAG — references super RAG as foundation milestone"},
+        {"source": "production-super-rag.md", "chunk_index": 15, "relevance": 1, "reason": "Explicit Deferrals — what Phase 2 does NOT include"}
+      ]
+    },
+    {
+      "id": "w2q24",
+      "query": "What Kubernetes storage classes are used and why?",
+      "scope": "agentopia-architecture",
+      "scenario": "infra",
+      "relevant_chunks": [
+        {"source": "environment-migration.md", "chunk_index": 5, "relevance": 2, "reason": "Ingress section — storageClass: local-path (k3s) vs ebs-gp3 (EKS) config"},
+        {"source": "fresh-deploy.md", "chunk_index": 13, "relevance": 1, "reason": "Bot pod troubleshooting — EFS StorageClass reference"},
+        {"source": "008-sa-kb-product-boundary-tenancy-isolation.md", "chunk_index": 3, "relevance": 1, "reason": "Single k3s cluster, single namespace decision — storage context"}
+      ]
+    },
+    {
+      "id": "w2q25",
+      "query": "How does the CI/CD pipeline build and deploy images?",
+      "scope": "agentopia-architecture",
+      "scenario": "infra",
+      "relevant_chunks": [
+        {"source": "chatbot-architecture.md", "chunk_index": 15, "relevance": 2, "reason": "GitOps and Deployment section — CI/CD pipeline overview with ArgoCD Image Updater"},
+        {"source": "environment-migration.md", "chunk_index": 2, "relevance": 1, "reason": "Per-Environment Files — deploy pipeline flows through ArgoCD"},
+        {"source": "environment-migration.md", "chunk_index": 12, "relevance": 1, "reason": "Bot Deploy Flow — deploy pipeline with CI/CD steps"},
+        {"source": "environment-migration.md", "chunk_index": 10, "relevance": 1, "reason": "Phase 5: Deploy — deployment checklist"}
+      ]
+    }
+  ]
+}
