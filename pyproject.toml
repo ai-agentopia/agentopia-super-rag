@@ -1,0 +1,27 @@
+[project]
+name = "agentopia-super-rag"
+version = "0.1.0"
+description = "Governed, multi-tenant retrieval service for the Agentopia platform"
+requires-python = ">=3.12"
+
+# Phase 1: scaffolding only — service source is extracted in Phase 2.
+# Dependencies intentionally match the agentopia-protocol/knowledge-api freeze commit.
+# See docs/migration.md for extraction plan.
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+markers = [
+    "integration: requires Qdrant + Postgres (run locally, not in CI)",
+    "e2e: requires full stack against live cluster (run locally, not in CI)",
+    "slow: slow tests excluded from fast gate",
+]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = ["E501"]

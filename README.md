@@ -65,15 +65,34 @@ K8s API access uses in-cluster service account. In local dev, binding cache fall
 
 ## Local Dev Workflow
 
-> Until extraction is complete, local dev runs from `agentopia-protocol/knowledge-api/`.
+> **Phase 1 (current):** Repo is bootstrapped. Service source has not been extracted yet.
+> Local dev for the running service still runs from `agentopia-protocol/knowledge-api/`.
+> Phase 2 will enable local dev from this repo.
 
-**Prerequisites:** Python 3.12, running Qdrant, running PostgreSQL.
+### What you can do now (Phase 1)
 
 ```bash
-cd agentopia-protocol/knowledge-api/src
+# Clone and install dependencies
+git clone git@github.com:ai-agentopia/agentopia-super-rag.git
+cd agentopia-super-rag
 pip install -r requirements.txt
 
-# Required env vars
+# Run fast gate (passes with 0 tests in Phase 1 — expected)
+python -m pytest tests/ -m "not integration and not e2e" -x -q
+```
+
+### What is NOT runnable yet (Phase 1)
+
+The following require Phase 2 (code extraction) to be complete:
+- `uvicorn main:app` — no `src/main.py` yet
+- Integration tests — no service source
+- Docker build producing a running container — Dockerfile source COPY commented out
+- Evaluation harness — no datasets or runners yet
+
+### After Phase 2 — full local dev
+
+```bash
+# Start service (requires Qdrant + Postgres)
 export QDRANT_URL=http://localhost:6333
 export POSTGRES_DSN=postgresql://user:pass@localhost:5432/agentopia
 export EMBEDDING_API_URL=https://openrouter.ai/api/v1/embeddings
@@ -81,26 +100,33 @@ export EMBEDDING_API_KEY=<key>
 export KNOWLEDGE_API_INTERNAL_TOKEN=<token>
 export K8S_NAMESPACE=agentopia
 
-uvicorn main:app --host 0.0.0.0 --port 8080 --reload
+cd src && uvicorn main:app --host 0.0.0.0 --port 8002 --reload
+
+# Fast gate (no external deps)
+pytest tests/ -m "not integration and not e2e" -x -q
+
+# Integration gate (requires Qdrant + Postgres)
+pytest tests/ -m "integration" -x -q
 ```
 
-**Run tests:**
+Until Phase 2 is complete, run the service from:
 ```bash
-# Fast gate (no external dependencies)
-python -m pytest tests/ -m "not integration and not e2e" -x -q
-
-# Full suite (requires Qdrant + Postgres)
-python -m pytest tests/ -x -q
+cd agentopia-protocol/knowledge-api/src
 ```
 
 ---
 
 ## CI/CD Overview
 
-CI runs on every push to `dev` branch in `agentopia-protocol` (current location):
-- Fast test gate before Docker image build
-- Docker image pushed to `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}`
-- ArgoCD Image Updater picks up new `dev-{sha}` tags and deploys to `agentopia-dev`
+**Phase 1 (current):**
+- CI runs on push to `dev` in this repo: fast gate (`.github/workflows/ci.yml`)
+- Docker image is buildable via `workflow_dispatch` but **NOT pushed** — gated by atomic cutover (#24)
+- Production image is still built and pushed from `agentopia-protocol`
+
+**After Phase 3 cutover:**
+- CI pushes `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}` from this repo
+- ArgoCD Image Updater picks up new tags and deploys to `agentopia-dev`
+- `agentopia-protocol` no longer builds or pushes the knowledge-api image
 
 After extraction to this repo, CI will be set up here directly. See [docs/migration.md](docs/migration.md).
 

@@ -56,22 +56,25 @@ The atomic cutover transaction is owned by **agentopia-super-rag#24**.
 
 ## Extraction Phases
 
-### Phase 0 (current): Contract / Ownership Freeze
+### Phase 0: Contract / Ownership Freeze (pending sign-off)
 - [x] GitHub repo created
-- [x] Documentation baseline written and route table verified against source
+- [x] Documentation baseline written and route table verified against source (PR #26)
 - [x] Phase 0 exit checklist added to this doc
 - [x] Image ownership cutover rule documented
 - [ ] A1: CTO sign-off on docs/architecture.md as authoritative contract
-- [ ] A2: Freeze notice committed to agentopia-protocol/knowledge-api/
+- [ ] A2: Freeze notice committed to agentopia-protocol/knowledge-api/ (PR #390)
 - [ ] A3: Artifact ownership issue accepted
 - [ ] A4: This doc accepted as complete
 
-### Phase 1: Repo Bootstrap
-Set up the new repo structure before any code moves:
-- Directory skeleton: `src/`, `src/tests/`, `evaluation/`, `.github/workflows/`
-- `pyproject.toml`, `requirements.txt` (version-pinned, matching monorepo freeze commit)
-- CI: fast test gate on push to `dev`; Docker build workflow exists but image push is `workflow_dispatch` only (gated until Phase 3 cutover)
-- README and docs verified and signed off (B3)
+### Phase 1 (current): Repo Bootstrap
+- [x] Directory structure: `src/`, `tests/`, `evaluation/`, `.github/workflows/`
+- [x] `pyproject.toml` with Python 3.12 constraint and pytest config
+- [x] `requirements.txt` pinned from monorepo freeze commit
+- [x] `Dockerfile` placeholder (structurally correct, source COPY commented until Phase 2)
+- [x] CI: `.github/workflows/ci.yml` (fast gate on dev push, passes with 0 tests in Phase 1)
+- [x] CI: `.github/workflows/build-image.yml` (workflow_dispatch only, push gated by cutover)
+- [x] `.gitignore`
+- [ ] B3: Docs verified and signed off against current source (pending Phase 0 merge)
 
 ### Phase 2: Code Extraction
 Copy monorepo source without functional changes (using freeze commit SHA as copy source):
