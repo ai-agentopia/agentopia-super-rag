@@ -1,0 +1,43 @@
+{
+  "version": "2.0",
+  "description": "Phase 1a evaluation queries — runner executes actual retrieval + generation. NOT a labeled golden dataset (that is Phase 1b #318).",
+  "phase": "1a",
+  "note": "Reference-free metrics only. No nDCG, MRR, or Precision@K claims. Contexts and responses are produced by the system under test, not pre-baked.",
+  "samples": [
+    {
+      "id": "s01",
+      "user_input": "What chunking strategies does the knowledge system support?",
+      "scope": "acme/platform-docs",
+      "scenario": "factual_recall",
+      "search_limit": 5
+    },
+    {
+      "id": "s02",
+      "user_input": "How does document deduplication work during ingestion?",
+      "scope": "acme/platform-docs",
+      "scenario": "process_explanation",
+      "search_limit": 5
+    },
+    {
+      "id": "s03",
+      "user_input": "What authentication methods are used for knowledge routes?",
+      "scope": "acme/platform-docs",
+      "scenario": "security_architecture",
+      "search_limit": 5
+    },
+    {
+      "id": "s04",
+      "user_input": "What is the maximum context token budget for knowledge injection?",
+      "scope": "acme/platform-docs",
+      "scenario": "configuration_detail",
+      "search_limit": 5
+    },
+    {
+      "id": "s05",
+      "user_input": "How does the bot-scope binding work at runtime?",
+      "scope": "acme/platform-docs",
+      "scenario": "runtime_architecture",
+      "search_limit": 5
+    }
+  ]
+}

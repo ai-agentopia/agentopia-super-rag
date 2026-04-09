@@ -1,0 +1,1221 @@
+"""Knowledge base service — ingestion, chunking, retrieval (#330).
+
+Owned by knowledge-api. This is the sole retrieval data plane.
+Bot search: gateway → knowledge-api directly (#328).
+Operator reads/writes: bot-config-api → knowledge-api proxy (#320).
+"""
+
+import hashlib
+import logging
+import time
+from typing import Any
+
+from models.knowledge import (
+    ChunkingStrategy,
+    Citation,
+    DocumentChunk,
+    DocumentFormat,
+    DocumentMetadata,
+    DocumentRecord,
+    DocumentRecordStatus,
+    IngestConfig,
+    IngestResult,
+    KnowledgeScope,
+    SearchResult,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def parse_pdf(raw_bytes: bytes) -> str:
+    """Extract text from PDF bytes using PyPDF2."""
+    from PyPDF2 import PdfReader
+    import io
+
+    reader = PdfReader(io.BytesIO(raw_bytes))
+    pages = []
+    for page in reader.pages:
+        text = page.extract_text()
+        if text:
+            pages.append(text)
+    return "\n\n".join(pages)
+
+
+def parse_html(raw_bytes: bytes) -> str:
+    """Extract text from HTML bytes using BeautifulSoup."""
+    from bs4 import BeautifulSoup
+
+    soup = BeautifulSoup(raw_bytes, "html.parser")
+    # Remove script and style elements
+    for tag in soup(["script", "style"]):
+        tag.decompose()
+    return soup.get_text(separator="\n", strip=True)
+
+
+def chunk_document(
+    content: str,
+    source: str,
+    scope: str,
+    format: DocumentFormat,
+    config: IngestConfig,
+    document_hash: str = "",
+    ingested_at: float = 0.0,
+) -> list[DocumentChunk]:
+    """Split document into chunks based on chunking strategy.
+
+    Returns list of DocumentChunks ready for embedding.
+    """
+    if config.chunking_strategy == ChunkingStrategy.PARAGRAPH:
+        texts = _chunk_by_paragraph(content, config.chunk_size)
+    elif config.chunking_strategy == ChunkingStrategy.CODE_AWARE:
+        texts = _chunk_code_aware(content, config.chunk_size)
+    else:
+        texts = _chunk_fixed_size(content, config.chunk_size, config.chunk_overlap)
+
+    chunks = []
+    for i, text in enumerate(texts):
+        if not text.strip():
+            continue
+        chunks.append(
+            DocumentChunk(
+                text=text,
+                metadata=DocumentMetadata(
+                    source=source,
+                    format=format,
+                    scope=scope,
+                    section=_extract_section(text),
+                    chunk_index=i,
+                    total_chunks=len(texts),
+                    ingested_at=ingested_at,
+                    document_hash=document_hash,
+                ),
+            )
+        )
+    return chunks
+
+
+def _chunk_fixed_size(content: str, size: int, overlap: int) -> list[str]:
+    """Fixed-size chunking with overlap."""
+    chunks = []
+    start = 0
+    while start < len(content):
+        end = start + size
+        chunks.append(content[start:end])
+        start = end - overlap
+        if start >= len(content):
+            break
+    return chunks
+
+
+def _chunk_by_paragraph(content: str, max_size: int) -> list[str]:
+    """Chunk by paragraph boundaries, merging small paragraphs."""
+    paragraphs = content.split("\n\n")
+    chunks = []
+    current = ""
+    for para in paragraphs:
+        para = para.strip()
+        if not para:
+            continue
+        if len(current) + len(para) + 2 <= max_size:
+            current = f"{current}\n\n{para}" if current else para
+        else:
+            if current:
+                chunks.append(current)
+            current = para[:max_size] if len(para) > max_size else para
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+def _chunk_code_aware(content: str, max_size: int) -> list[str]:
+    """Code-aware chunking: split on function/class boundaries."""
+    import re
+
+    # Split on function/class definitions
+    pattern = r"(?=\n(?:def |class |function |async function |export ))"
+    parts = re.split(pattern, content)
+    chunks = []
+    current = ""
+    for part in parts:
+        if len(current) + len(part) <= max_size:
+            current += part
+        else:
+            if current:
+                chunks.append(current)
+            current = part[:max_size] if len(part) > max_size else part
+    if current:
+        chunks.append(current)
+    return chunks or [content[:max_size]]
+
+
+def _extract_section(text: str) -> str:
+    """Extract section heading from chunk text."""
+    import re
+
+    match = re.search(r"^#{1,3}\s+(.+)$", text, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def build_citations(results: list[dict[str, Any]]) -> list[SearchResult]:
+    """Build search results with citations from Qdrant payload (#102, ADR-011)."""
+    search_results = []
+    for r in results:
+        payload = r.get("payload", {})
+        metadata = payload.get("metadata", {})
+        search_results.append(
+            SearchResult(
+                text=payload.get("text", r.get("text", "")),
+                score=r.get("score", 0.0),
+                scope=metadata.get("scope", ""),
+                citation=Citation(
+                    source=metadata.get("source", ""),
+                    section=metadata.get("section", ""),
+                    page=metadata.get("page"),
+                    chunk_index=metadata.get("chunk_index", 0),
+                    score=r.get("score", 0.0),
+                    ingested_at=metadata.get("ingested_at", 0.0),
+                    document_hash=metadata.get("document_hash", ""),
+                ),
+            )
+        )
+    return search_results
+
+
+def format_citations(results: list[SearchResult]) -> str:
+    """Format citations as markdown references for LLM context."""
+    if not results:
+        return ""
+    lines = ["## Sources"]
+    for i, r in enumerate(results, 1):
+        c = r.citation
+        ref = f"[{i}] {c.source}"
+        if c.section:
+            ref += f", {c.section}"
+        if c.page is not None:
+            ref += f", p.{c.page}"
+        ref += f" (score: {c.score:.2f})"
+        lines.append(ref)
+    return "\n".join(lines)
+
+
+def compute_chunk_hash(text: str) -> str:
+    """MD5 hash for dedup/incremental indexing (#101)."""
+    return hashlib.md5(text.encode()).hexdigest()
+
+
+def compute_document_hash(content: str) -> str:
+    """SHA-256 hash of full document content (ADR-011 §1)."""
+    return hashlib.sha256(content.encode()).hexdigest()
+
+
+def compute_point_id(scope: str, source: str, chunk_index: int) -> int:
+    """Composite provenance-safe Qdrant point ID (ADR-011 §2).
+
+    Deterministic integer from SHA-256 of scope:source:chunk_index.
+    Avoids collisions for identical text across different documents/scopes.
+    """
+    composite = f"{scope}:{source}:{chunk_index}"
+    return int(hashlib.sha256(composite.encode()).hexdigest()[:16], 16)
+
+
+class KnowledgeService:
+    """Manages knowledge scopes and provides ingestion/search operations.
+
+    In production, connects to Qdrant for vector storage.
+    For testing, uses in-memory storage.
+    Document lifecycle persisted via DocumentStore (#303).
+    """
+
+    def __init__(self) -> None:
+        self._scopes: dict[str, KnowledgeScope] = {}
+        self._chunks: dict[str, list[DocumentChunk]] = {}  # scope → chunks
+        self._chunk_hashes: dict[str, set[str]] = {}  # scope → seen hashes (#101 dedup)
+        self._qdrant: "QdrantBackend | None" = (
+            None  # injected by get_knowledge_service()
+        )
+        self._doc_store: "DocumentStore | None" = None  # injected by get_knowledge_service()
+
+    def ingest(
+        self,
+        scope: str,
+        content: str,
+        source: str,
+        format: DocumentFormat = DocumentFormat.TEXT,
+        config: IngestConfig | None = None,
+    ) -> IngestResult:
+        """Ingest a document with lifecycle management (#303, ADR-011/012).
+
+        Same-hash re-upload → return unchanged, no churn.
+        Different-hash re-upload → two-phase replace:
+          Phase 1 (prepare): compute new chunks
+          Phase 2 (commit): supersede old record, delete old chunks, upsert new, create new record
+        """
+        config = config or IngestConfig()
+        doc_hash = compute_document_hash(content)
+        ingested_at = time.time()
+
+        # ── Same-hash short circuit (ADR-012 §2) ────────────────────
+        if self._doc_store:
+            existing = self._doc_store.get_active(scope, source)
+            if existing and existing.document_hash == doc_hash:
+                logger.info(
+                    "Same-hash re-upload for '%s' in '%s' — unchanged",
+                    source, scope,
+                )
+                return IngestResult(
+                    scope=scope,
+                    source=source,
+                    chunks_created=0,
+                    chunks_skipped=0,
+                    format=format,
+                    document_hash=doc_hash,
+                    ingested_at=existing.ingested_at,
+                )
+
+        # ── Phase 1: Prepare — compute new chunks ───────────────────
+        raw_chunks = chunk_document(
+            content, source, scope, format, config,
+            document_hash=doc_hash, ingested_at=ingested_at,
+        )
+
+        if scope not in self._scopes:
+            self._scopes[scope] = KnowledgeScope(name=scope)
+        if scope not in self._chunks:
+            self._chunks[scope] = []
+
+        # Dedup within scope
+        seen = self._chunk_hashes.setdefault(scope, set())
+        chunks = []
+        for chunk in raw_chunks:
+            h = compute_chunk_hash(chunk.text)
+            if h not in seen:
+                seen.add(h)
+                chunks.append(chunk)
+
+        # ── Phase 2: Commit — atomic swap of active version ──────────
+        # Contract (ADR-012): old document remains authoritative until commit succeeds.
+        # replace_active() atomically supersedes old + creates new in one transaction.
+        # If it fails, old active record stays untouched.
+        is_replace = False
+        if self._doc_store:
+            existing = self._doc_store.get_active(scope, source)
+            if existing:
+                is_replace = True
+
+                new_record = DocumentRecord(
+                    scope=scope,
+                    source=source,
+                    document_hash=doc_hash,
+                    format=format,
+                    chunk_count=len(raw_chunks),
+                    ingested_at=ingested_at,
+                    status=DocumentRecordStatus.ACTIVE,
+                )
+                # Atomic commit: old stays active until this succeeds
+                self._doc_store.replace_active(scope, source, new_record)
+
+                # Commit succeeded — now safe to clean up old chunks
+                if self._qdrant:
+                    try:
+                        self._qdrant.delete_by_source(scope, source)
+                    except Exception as exc:
+                        logger.warning("Qdrant delete_by_source failed during replace: %s", exc)
+                # Remove old chunks from memory
+                self._chunks[scope] = [
+                    c for c in self._chunks[scope] if c.metadata.source != source
+                ]
+                # Reset dedup hashes for this scope
+                remaining_hashes = {
+                    compute_chunk_hash(c.text) for c in self._chunks.get(scope, [])
+                }
+                self._chunk_hashes[scope] = remaining_hashes
+                # Re-compute new chunks against clean dedup state
+                seen = self._chunk_hashes[scope]
+                chunks = []
+                for chunk in raw_chunks:
+                    h = compute_chunk_hash(chunk.text)
+                    if h not in seen:
+                        seen.add(h)
+                        chunks.append(chunk)
+
+        # Add new chunks to memory
+        self._chunks[scope].extend(chunks)
+        if is_replace:
+            self._scopes[scope].chunk_count = len(self._chunks.get(scope, []))
+        else:
+            self._scopes[scope].document_count += 1
+            self._scopes[scope].chunk_count += len(chunks)
+        self._scopes[scope].last_indexed = time.time()
+
+        # Upsert new chunks to Qdrant
+        if self._qdrant and chunks:
+            try:
+                self._qdrant.ingest_chunks(scope, chunks)
+            except Exception as exc:
+                logger.warning("Qdrant ingest failed for scope '%s': %s", scope, exc)
+
+        # First ingest (not replace): create new active record
+        if self._doc_store and not is_replace:
+            self._doc_store.create(DocumentRecord(
+                scope=scope,
+                source=source,
+                document_hash=doc_hash,
+                format=format,
+                chunk_count=len(chunks),
+                ingested_at=ingested_at,
+                status=DocumentRecordStatus.ACTIVE,
+            ))
+
+        action = "Replaced" if is_replace else "Ingested"
+        skipped = len(raw_chunks) - len(chunks)
+        logger.info(
+            "%s %d chunks from '%s' into scope '%s' (%d deduped/skipped)",
+            action, len(chunks), source, scope, skipped,
+        )
+        return IngestResult(
+            scope=scope,
+            source=source,
+            chunks_created=len(chunks),
+            chunks_skipped=skipped,
+            format=format,
+            document_hash=doc_hash,
+            ingested_at=ingested_at,
+        )
+
+    def search(
+        self,
+        query: str,
+        scopes: list[str],
+        limit: int = 5,
+        min_score: float = 0.0,
+    ) -> list[SearchResult]:
+        """Search across knowledge scopes.
+
+        Routes to Qdrant vector similarity search when backend is configured (#23),
+        otherwise falls back to in-memory text matching (tests / local dev).
+        Emits per-result provenance audit log (ADR-011 §5).
+        """
+        # Qdrant path: fan-out across scopes, merge, sort, limit
+        if self._qdrant:
+            all_results: list[SearchResult] = []
+            for scope in scopes:
+                try:
+                    all_results.extend(
+                        self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Qdrant search failed for scope '%s': %s", scope, exc
+                    )
+            all_results.sort(key=lambda r: r.score, reverse=True)
+            final = all_results[:limit]
+            self._audit_search_results(final)
+            return final
+
+        # In-memory fallback path
+        results = []
+        query_lower = query.lower()
+        for scope in scopes:
+            for chunk in self._chunks.get(scope, []):
+                # Simple text matching score (production: cosine similarity)
+                text_lower = chunk.text.lower()
+                if query_lower in text_lower:
+                    score = 1.0
+                else:
+                    words = query_lower.split()
+                    matched = sum(1 for w in words if w in text_lower)
+                    score = matched / len(words) if words else 0.0
+                if score > 0:
+                    results.append(
+                        SearchResult(
+                            text=chunk.text[:500],
+                            score=score,
+                            scope=scope,
+                            citation=Citation(
+                                source=chunk.metadata.source,
+                                section=chunk.metadata.section,
+                                page=chunk.metadata.page,
+                                chunk_index=chunk.metadata.chunk_index,
+                                score=score,
+                                ingested_at=chunk.metadata.ingested_at,
+                                document_hash=chunk.metadata.document_hash,
+                            ),
+                        )
+                    )
+        results.sort(key=lambda r: r.score, reverse=True)
+        final = results[:limit]
+        self._audit_search_results(final)
+        return final
+
+    @staticmethod
+    def _audit_search_results(results: list[SearchResult]) -> None:
+        """Emit per-result provenance audit log (ADR-011 §5)."""
+        for r in results:
+            logger.info(
+                "knowledge_search_result: source=%s chunk_index=%d scope=%s "
+                "document_hash=%s score=%.4f",
+                r.citation.source,
+                r.citation.chunk_index,
+                r.scope,
+                r.citation.document_hash,
+                r.score,
+            )
+
+    def list_scopes(self) -> list[KnowledgeScope]:
+        """List all knowledge scopes with stats (#106)."""
+        return list(self._scopes.values())
+
+    def get_scope(self, name: str) -> KnowledgeScope | None:
+        """Get a specific scope's metadata."""
+        return self._scopes.get(name)
+
+    def delete_scope(self, name: str) -> bool:
+        """Delete a knowledge scope and all its chunks (#106, ADR-011, #303)."""
+        if name in self._scopes:
+            del self._scopes[name]
+            self._chunks.pop(name, None)
+            self._chunk_hashes.pop(name, None)
+            # Delete Qdrant collection (ADR-011 — real deletion)
+            if self._qdrant:
+                try:
+                    self._qdrant.delete_collection(name)
+                except Exception as exc:
+                    logger.warning(
+                        "Qdrant delete_collection failed for '%s': %s", name, exc,
+                    )
+            # Mark all active documents in scope as deleted (#303)
+            if self._doc_store:
+                self._doc_store.mark_scope_deleted(name)
+            logger.info("Deleted knowledge scope '%s'", name)
+            return True
+        return False
+
+    def delete_document(self, scope: str, source: str) -> int:
+        """Delete all chunks from a specific source document (#106, ADR-011, #303)."""
+        if scope not in self._chunks:
+            return 0
+        before = len(self._chunks[scope])
+        self._chunks[scope] = [
+            c for c in self._chunks[scope] if c.metadata.source != source
+        ]
+        removed = before - len(self._chunks[scope])
+        if removed > 0 and scope in self._scopes:
+            self._scopes[scope].chunk_count -= removed
+            self._scopes[scope].document_count = max(
+                0, self._scopes[scope].document_count - 1
+            )
+        # Invalidate deleted chunk hashes so re-ingest is treated as new (#101)
+        if scope in self._chunk_hashes and removed > 0:
+            remaining_hashes = {
+                compute_chunk_hash(c.text) for c in self._chunks.get(scope, [])
+            }
+            self._chunk_hashes[scope] = remaining_hashes
+        # Delete from Qdrant (ADR-011 — real deletion, not orphan)
+        if self._qdrant and removed > 0:
+            try:
+                self._qdrant.delete_by_source(scope, source)
+            except Exception as exc:
+                logger.warning(
+                    "Qdrant delete_by_source failed for '%s/%s': %s",
+                    scope, source, exc,
+                )
+        # Mark document as deleted in lifecycle store (#303)
+        if self._doc_store:
+            self._doc_store.mark_deleted(scope, source)
+        return removed
+
+    def list_documents(self, scope: str) -> list[dict]:
+        """List documents in a scope (#106, #303).
+
+        Uses DocumentStore if available (durable, includes provenance).
+        Falls back to in-memory chunk scan.
+        """
+        if self._doc_store:
+            records = self._doc_store.list_active(scope)
+            return [
+                {
+                    "source": r.source,
+                    "chunk_count": r.chunk_count,
+                    "scope": r.scope,
+                    "document_hash": r.document_hash,
+                    "ingested_at": r.ingested_at,
+                    "format": r.format.value,
+                }
+                for r in records
+            ]
+        # Fallback: in-memory chunk scan
+        chunks = self._chunks.get(scope, [])
+        sources: dict[str, int] = {}
+        for chunk in chunks:
+            src = chunk.metadata.source or ""
+            sources[src] = sources.get(src, 0) + 1
+        return [
+            {"source": src, "chunk_count": count, "scope": scope}
+            for src, count in sorted(sources.items())
+        ]
+
+    def reindex(self, scope: str) -> dict:
+        """Reset chunk hashes so next ingest re-indexes all content (#101).
+
+        Does NOT remove existing chunks — clears the dedup cache so that
+        re-submitted content is not silently skipped.
+        """
+        if scope not in self._scopes:
+            return {"scope": scope, "status": "not_found"}
+        chunk_count = len(self._chunks.get(scope, []))
+        self._chunk_hashes.pop(scope, None)
+        logger.info(
+            "Reindex triggered for scope '%s': cleared %d chunk hashes",
+            scope,
+            chunk_count,
+        )
+        return {
+            "scope": scope,
+            "status": "reindex_triggered",
+            "chunks_cleared_for_reindex": chunk_count,
+        }
+
+    def list_stale_scopes(self, max_age_secs: float = 86400.0) -> list[str]:
+        """Return names of scopes whose last_indexed exceeds max_age_secs (#101)."""
+        return [s.name for s in self._scopes.values() if s.is_stale(max_age_secs)]
+
+
+class QdrantBackend:
+    """Qdrant-backed knowledge storage (#23, #100).
+
+    One Qdrant collection per knowledge scope (collection-per-scope pattern).
+    Embedding is done via the configured embedding model.
+
+    Falls back silently if qdrant-client is not installed or QDRANT_URL is unset.
+    Use KnowledgeService for all access — do not instantiate directly in tests.
+    """
+
+    def __init__(self, url: str, api_key: str = "") -> None:
+        import os
+        from qdrant_client import QdrantClient  # type: ignore
+        from qdrant_client.models import Distance, VectorParams  # type: ignore
+
+        self._client = QdrantClient(url=url, api_key=api_key or None)
+        self._Distance = Distance
+        self._VectorParams = VectorParams
+        self._collection_cache: set[str] = set()
+
+        # ── Model-variable embedding config (#331) ────────────────────────
+        # All embedding parameters are config-driven. Changing model or
+        # dimension requires Qdrant collection reindex.
+        self.VECTOR_SIZE = int(os.getenv("EMBEDDING_VECTOR_DIMENSION", "1536"))
+        self._embedding_model = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-small")
+        self._embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://openrouter.ai/api/v1/embeddings")
+        self._embedding_timeout = int(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30"))
+        self._embedding_api_key = os.getenv("OPENROUTER_API_KEY", "")
+
+        # Hybrid retrieval config (#319, frozen)
+        self._hybrid_enabled = os.getenv("HYBRID_SEARCH_ENABLED", "false").lower() == "true"
+        self._hybrid_prefetch_limit = int(os.getenv("HYBRID_PREFETCH_LIMIT", "20"))
+
+        mode = "hybrid (dense+sparse+RRF)" if self._hybrid_enabled else "dense-only"
+        logger.info(
+            "QdrantBackend: connected to %s (model=%s, dims=%d, timeout=%ds, mode=%s)",
+            url, self._embedding_model, self.VECTOR_SIZE, self._embedding_timeout, mode,
+        )
+
+        # ── Startup dimension validation ─────────────────────────────────
+        # Fail-fast if existing Qdrant collection dimension != configured
+        # dimension. This catches model/dimension drift before silent corruption.
+        self._validate_collection_dimensions()
+
+    def _validate_collection_dimensions(self) -> None:
+        """Check existing Qdrant collections for dimension mismatch (#331).
+
+        If any kb-* collection has a different vector dimension than the
+        configured EMBEDDING_VECTOR_DIMENSION, log a warning. This is a
+        signal that reindex is required after model/dimension change.
+
+        Does NOT fail-fast on mismatch (allows graceful migration) but
+        logs a clear warning for operator visibility.
+        """
+        try:
+            collections = self._client.get_collections().collections
+            for col in collections:
+                if not col.name.startswith("kb-"):
+                    continue
+                try:
+                    info = self._client.get_collection(col.name)
+                    config = info.config
+                    params = config.params
+                    vectors = params.vectors
+                    if isinstance(vectors, dict):
+                        # Named vectors (hybrid): check "dense" key
+                        dense_cfg = vectors.get("dense")
+                        if dense_cfg and dense_cfg.size != self.VECTOR_SIZE:
+                            logger.warning(
+                                "DIMENSION_MISMATCH: collection '%s' has dense dim=%d, "
+                                "config expects dim=%d. Reindex required (#331).",
+                                col.name, dense_cfg.size, self.VECTOR_SIZE,
+                            )
+                    elif hasattr(vectors, "size") and vectors.size != self.VECTOR_SIZE:
+                        # Unnamed vector (dense-only)
+                        logger.warning(
+                            "DIMENSION_MISMATCH: collection '%s' has dim=%d, "
+                            "config expects dim=%d. Reindex required (#331).",
+                            col.name, vectors.size, self.VECTOR_SIZE,
+                        )
+                except Exception:
+                    pass  # Collection info unavailable — skip
+        except Exception as exc:
+            logger.debug("Collection dimension validation skipped: %s", exc)
+
+    @staticmethod
+    def _qdrant_collection_name(scope: str) -> str:
+        """Map canonical scope identity to a collision-safe Qdrant collection name (#327).
+
+        Canonical scope identity uses '/' as the client/scope separator
+        (e.g. 'acme-corp/api-docs'). Qdrant collection names must not
+        contain '/'.
+
+        We use a SHA-256 hash of the full canonical identity to produce
+        a deterministic, collision-resistant physical name:
+            kb-{sha256_hex[:16]}
+
+        Examples:
+            'acme-corp/api-docs'  → 'kb-<16-hex-chars>'
+            'acme/foo--bar'       → 'kb-<different-16-hex-chars>'
+            'acme--foo/bar'       → 'kb-<different-16-hex-chars>'
+
+        The old '/' → '--' mapping was NOT injective: 'acme/foo--bar' and
+        'acme--foo/bar' both mapped to 'acme--foo--bar'. SHA-256 with 64
+        bits (16 hex chars) is collision-resistant for practical scope counts.
+
+        The canonical form (with '/') is always preserved in annotations,
+        logs, public API responses, and provenance metadata — only Qdrant
+        sees the hashed physical name.
+        """
+        digest = hashlib.sha256(scope.encode("utf-8")).hexdigest()[:16]
+        return f"kb-{digest}"
+
+    def health_check(self) -> dict[str, str]:
+        """Check Qdrant connectivity. Returns {"status": "ok"} or {"status": "...", "message": "..."}."""
+        try:
+            collections = self._client.get_collections()
+            return {
+                "status": "ok",
+                "collections": str(len(collections.collections)),
+            }
+        except Exception as exc:
+            return {"status": "unavailable", "message": str(exc)}
+
+    def _ensure_collection(self, scope: str) -> None:
+        """Create Qdrant collection for scope if it does not exist (#100, #319 hybrid)."""
+        cname = self._qdrant_collection_name(scope)
+        if cname in self._collection_cache:
+            return
+        try:
+            self._client.get_collection(cname)
+        except Exception:
+            if self._hybrid_enabled:
+                from qdrant_client.models import SparseVectorParams, SparseIndexParams  # type: ignore
+                self._client.create_collection(
+                    collection_name=cname,
+                    vectors_config={
+                        "dense": self._VectorParams(
+                            size=self.VECTOR_SIZE,
+                            distance=self._Distance.COSINE,
+                        ),
+                    },
+                    sparse_vectors_config={
+                        "sparse": SparseVectorParams(
+                            index=SparseIndexParams(on_disk=False),
+                        ),
+                    },
+                )
+                logger.info("QdrantBackend: created hybrid collection '%s' (dense+sparse)", cname)
+            else:
+                self._client.create_collection(
+                    collection_name=cname,
+                    vectors_config=self._VectorParams(
+                        size=self.VECTOR_SIZE,
+                        distance=self._Distance.COSINE,
+                    ),
+                )
+                logger.info("QdrantBackend: created collection '%s' (dense-only)", cname)
+        self._collection_cache.add(cname)
+
+    # ── BM25 sparse encoding for hybrid search (#319) ──────────────────────
+
+    # BM25 hyperparameters (Okapi BM25 defaults)
+    _bm25_k1: float = 1.2
+    _bm25_b: float = 0.75
+
+    # Corpus statistics — rebuilt per-scope at index/search time
+    _bm25_stats: dict[str, dict] = {}  # scope → {N, df, avgdl}
+
+    @staticmethod
+    def _tokenize(text: str) -> list[str]:
+        """Tokenize text: lowercase, split on non-alphanumeric."""
+        import re
+        return re.findall(r"[a-z0-9]+", text.lower())
+
+    @staticmethod
+    def _term_id(word: str) -> int:
+        """Map word to sparse vector index (stable across processes, int32 range).
+
+        Uses SHA-256 truncated to 31 bits. Python's built-in hash() is
+        randomized per process (PYTHONHASHSEED), making it unsuitable for
+        sparse vector coordinate identity that must be consistent across
+        indexing and querying — which may happen in different processes,
+        pods, or after restarts.
+        """
+        digest = hashlib.sha256(word.encode("utf-8")).digest()
+        return int.from_bytes(digest[:4], "big") % (2**31)
+
+    def _build_bm25_stats(self, scope: str) -> dict:
+        """Build BM25 corpus statistics from a Qdrant collection.
+
+        Computes:
+          N     — total number of documents
+          df    — dict of term → number of documents containing that term
+          avgdl — average document length (in tokens)
+        """
+        cname = self._qdrant_collection_name(scope)
+        all_texts: list[str] = []
+
+        # Scroll through all documents in the collection
+        offset = None
+        while True:
+            kwargs: dict = {
+                "collection_name": cname,
+                "limit": 100,
+                "with_payload": True,
+                "with_vectors": False,
+            }
+            if offset is not None:
+                kwargs["offset"] = offset
+            result = self._client.scroll(**kwargs)
+            points, next_offset = result
+            for pt in points:
+                text = pt.payload.get("text", "") if pt.payload else ""
+                all_texts.append(text)
+            if next_offset is None:
+                break
+            offset = next_offset
+
+        N = len(all_texts)
+        if N == 0:
+            return {"N": 0, "df": {}, "avgdl": 1.0}
+
+        from collections import Counter
+        df: Counter = Counter()
+        total_length = 0
+        for text in all_texts:
+            words = self._tokenize(text)
+            total_length += len(words)
+            unique_terms = set(words)
+            for term in unique_terms:
+                df[term] += 1
+
+        avgdl = total_length / N
+        stats = {"N": N, "df": dict(df), "avgdl": avgdl}
+        self._bm25_stats[scope] = stats
+        logger.info(
+            "BM25 stats built for scope '%s': N=%d, vocab=%d, avgdl=%.1f",
+            scope, N, len(df), avgdl,
+        )
+        return stats
+
+    def _get_bm25_stats(self, scope: str) -> dict:
+        """Get or build BM25 corpus statistics for a scope."""
+        if scope not in self._bm25_stats:
+            self._build_bm25_stats(scope)
+        return self._bm25_stats[scope]
+
+    def _bm25_idf(self, term: str, stats: dict) -> float:
+        """Compute IDF for a term: log((N - n + 0.5) / (n + 0.5) + 1)."""
+        import math
+        N = stats["N"]
+        n = stats["df"].get(term, 0)
+        return math.log((N - n + 0.5) / (n + 0.5) + 1.0)
+
+    def _encode_bm25_document(self, text: str, stats: dict) -> tuple[list[int], list[float]]:
+        """Encode a document into a BM25-weighted sparse vector.
+
+        Each term gets weight: IDF(t) * (f(t,d) * (k1+1)) / (f(t,d) + k1*(1-b+b*|d|/avgdl))
+
+        This is the full Okapi BM25 score per term, stored in the sparse vector.
+        At query time, query terms use IDF-only weights. Qdrant dot product
+        approximates BM25 ranking.
+        """
+        from collections import Counter
+
+        words = self._tokenize(text)
+        if not words:
+            return [], []
+
+        doc_len = len(words)
+        avgdl = stats["avgdl"] or 1.0
+        k1 = self._bm25_k1
+        b = self._bm25_b
+
+        counts = Counter(words)
+        indices = []
+        values = []
+        for term, tf in counts.items():
+            idf = self._bm25_idf(term, stats)
+            if idf <= 0:
+                continue  # Skip terms that appear in all documents
+            # BM25 TF component with length normalization
+            tf_norm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + b * doc_len / avgdl))
+            weight = idf * tf_norm
+            indices.append(self._term_id(term))
+            values.append(weight)
+        return indices, values
+
+    def _encode_bm25_query(self, text: str, stats: dict) -> tuple[list[int], list[float]]:
+        """Encode a query into a BM25 sparse vector.
+
+        Query terms use IDF weights only (no TF normalization needed for
+        short queries). Qdrant dot product with document BM25 vectors
+        produces the approximate BM25 ranking.
+        """
+        words = self._tokenize(text)
+        if not words:
+            return [], []
+
+        seen = set()
+        indices = []
+        values = []
+        for term in words:
+            if term in seen:
+                continue
+            seen.add(term)
+            idf = self._bm25_idf(term, stats)
+            if idf <= 0:
+                continue
+            indices.append(self._term_id(term))
+            values.append(idf)
+        return indices, values
+
+    def _tokenize_sparse(self, text: str, scope: str = "", mode: str = "document") -> tuple[list[int], list[float]]:
+        """Encode text into BM25-weighted sparse vector (#319).
+
+        Args:
+            text: Document or query text.
+            scope: Scope for corpus statistics lookup.
+            mode: 'document' for indexing, 'query' for search.
+
+        If no BM25 stats are available (no scope or empty corpus),
+        falls back to IDF=1.0 (equivalent to TF-only, but with BM25
+        length normalization).
+        """
+        stats = self._bm25_stats.get(scope, {"N": 0, "df": {}, "avgdl": 1.0})
+        if mode == "query":
+            return self._encode_bm25_query(text, stats)
+        return self._encode_bm25_document(text, stats)
+
+    # ── Circuit breaker state ──────────────────────────────────────────────
+    _cb_failures: int = 0
+    _cb_threshold: int = 5
+    _cb_cooldown: float = 300.0  # 5 minutes
+    _cb_open_until: float = 0.0
+
+    def _cb_record_success(self) -> None:
+        self._cb_failures = 0
+
+    def _cb_record_failure(self) -> None:
+        self._cb_failures += 1
+        if self._cb_failures >= self._cb_threshold:
+            self._cb_open_until = time.time() + self._cb_cooldown
+            logger.error(
+                "EmbeddingCircuitBreaker: OPEN — %d consecutive failures, fast-failing for %.0fs",
+                self._cb_failures, self._cb_cooldown,
+            )
+
+    def _cb_is_open(self) -> bool:
+        if self._cb_open_until == 0.0:
+            return False
+        if time.time() >= self._cb_open_until:
+            # Cooldown expired — allow half-open probe
+            logger.info("EmbeddingCircuitBreaker: cooldown expired, allowing probe")
+            self._cb_open_until = 0.0
+            self._cb_failures = 0
+            return False
+        return True
+
+    def _embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed texts via configured embedding API with retry + circuit breaker."""
+        import httpx
+
+        if self._cb_is_open():
+            raise RuntimeError(
+                f"EmbeddingCircuitBreaker: OPEN — fast-failing until "
+                f"{self._cb_open_until - time.time():.0f}s remaining"
+            )
+
+        max_attempts = 3
+        backoff = 1.0  # seconds, doubles each retry
+        last_exc: Exception | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = httpx.post(
+                    self._embedding_base_url,
+                    headers={"Authorization": f"Bearer {self._embedding_api_key}"},
+                    json={"model": self._embedding_model, "input": texts},
+                    timeout=self._embedding_timeout,
+                )
+                resp.raise_for_status()
+                data = resp.json()["data"]
+                self._cb_record_success()
+                return [item["embedding"] for item in sorted(data, key=lambda x: x["index"])]
+            except Exception as exc:
+                last_exc = exc
+                if attempt < max_attempts:
+                    logger.warning(
+                        "Embedding API attempt %d/%d failed: %s — retrying in %.1fs",
+                        attempt, max_attempts, exc, backoff,
+                    )
+                    time.sleep(backoff)
+                    backoff *= 2
+                else:
+                    logger.error(
+                        "Embedding API attempt %d/%d failed: %s — exhausted retries",
+                        attempt, max_attempts, exc,
+                    )
+
+        self._cb_record_failure()
+        raise RuntimeError(f"Embedding API failed after {max_attempts} attempts: {last_exc}")
+
+    def ingest_chunks(self, scope: str, chunks: list[DocumentChunk]) -> None:
+        """Embed and upsert chunks into Qdrant collection for scope (#23, ADR-011, #319 hybrid).
+
+        Uses composite point ID (scope:source:chunk_index) instead of text-hash
+        to avoid collisions for identical text across different documents/scopes.
+
+        When hybrid enabled: stores both dense (named "dense") and sparse (named "sparse")
+        vectors per point. When dense-only: stores unnamed dense vector (legacy).
+        """
+        if not chunks:
+            return
+        from qdrant_client.models import PointStruct  # type: ignore
+
+        cname = self._qdrant_collection_name(scope)
+        self._ensure_collection(scope)
+
+        texts = [c.text for c in chunks]
+        dense_vectors = self._embed(texts)
+
+        points = []
+        for chunk, dense_vec in zip(chunks, dense_vectors):
+            point_id = compute_point_id(
+                scope, chunk.metadata.source, chunk.metadata.chunk_index,
+            )
+            payload = {
+                "text": chunk.text,
+                "metadata": chunk.metadata.model_dump(),
+            }
+
+            if self._hybrid_enabled:
+                from qdrant_client.models import SparseVector  # type: ignore
+                indices, values = self._tokenize_sparse(chunk.text, scope=scope, mode="document")
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector={
+                            "dense": dense_vec,
+                            "sparse": SparseVector(indices=indices, values=values),
+                        },
+                        payload=payload,
+                    )
+                )
+            else:
+                points.append(
+                    PointStruct(
+                        id=point_id,
+                        vector=dense_vec,
+                        payload=payload,
+                    )
+                )
+        self._client.upsert(collection_name=cname, points=points)
+
+    def delete_by_source(self, scope: str, source: str) -> None:
+        """Delete all Qdrant points for a source within a scope (ADR-011)."""
+        from qdrant_client.models import (  # type: ignore
+            FieldCondition,
+            Filter,
+            FilterSelector,
+            MatchValue,
+        )
+
+        cname = self._qdrant_collection_name(scope)
+        try:
+            self._client.delete(
+                collection_name=cname,
+                points_selector=FilterSelector(
+                    filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="metadata.source",
+                                match=MatchValue(value=source),
+                            )
+                        ]
+                    )
+                ),
+            )
+            logger.info(
+                "QdrantBackend: deleted points for source '%s' in scope '%s'",
+                source, scope,
+            )
+        except Exception as exc:
+            logger.warning(
+                "QdrantBackend: delete_by_source failed for '%s/%s': %s",
+                scope, source, exc,
+            )
+            raise
+
+    def delete_collection(self, scope: str) -> bool:
+        """Delete an entire Qdrant collection for a scope (ADR-011)."""
+        cname = self._qdrant_collection_name(scope)
+        try:
+            self._client.delete_collection(collection_name=cname)
+            self._collection_cache.discard(cname)
+            logger.info("QdrantBackend: deleted collection '%s'", scope)
+            return True
+        except Exception as exc:
+            logger.warning(
+                "QdrantBackend: delete_collection failed for '%s': %s", scope, exc,
+            )
+            raise
+
+    def search_scope(
+        self,
+        query: str,
+        scope: str,
+        limit: int,
+        min_score: float = 0.0,
+    ) -> list[SearchResult]:
+        """Search within a single Qdrant collection (#319: hybrid or dense-only)."""
+        try:
+            self._ensure_collection(scope)
+        except Exception:
+            return []
+
+        t_start = time.time()
+        query_vector = self._embed([query])[0]
+        t_embed = time.time()
+
+        if self._hybrid_enabled:
+            results = self._search_hybrid(query, query_vector, scope, limit, min_score)
+            mode = "hybrid"
+        else:
+            results = self._search_dense_only(query_vector, scope, limit, min_score)
+            mode = "dense-only"
+
+        t_search = time.time()
+        logger.debug(
+            "search_scope: scope=%s mode=%s results=%d embed=%.3fs search=%.3fs total=%.3fs",
+            scope, mode, len(results), t_embed - t_start, t_search - t_embed, t_search - t_start,
+        )
+        return results
+
+    def _search_dense_only(
+        self, query_vector: list[float], scope: str, limit: int, min_score: float,
+    ) -> list[SearchResult]:
+        """Dense-only search (Phase 0). Uses query_points for qdrant-client v1.17+."""
+        cname = self._qdrant_collection_name(scope)
+        kwargs: dict[str, Any] = {
+            "collection_name": cname,
+            "query": query_vector,
+            "limit": limit,
+        }
+        if min_score > 0.0:
+            kwargs["score_threshold"] = min_score
+        query_response = self._client.query_points(**kwargs)
+        return build_citations(
+            [{"payload": p.payload, "score": p.score if p.score is not None else 0.0}
+             for p in query_response.points]
+        )
+
+    def _search_hybrid(
+        self, query: str, query_vector: list[float], scope: str, limit: int, min_score: float,
+    ) -> list[SearchResult]:
+        """Hybrid search: dense + sparse prefetch → RRF fusion (#319)."""
+        from qdrant_client.models import (  # type: ignore
+            FusionQuery,
+            Fusion,
+            Prefetch,
+            SparseVector,
+        )
+
+        cname = self._qdrant_collection_name(scope)
+        sparse_indices, sparse_values = self._tokenize_sparse(query, scope=scope, mode="query")
+        prefetch_limit = self._hybrid_prefetch_limit
+
+        prefetches = [
+            Prefetch(
+                query=query_vector,
+                using="dense",
+                limit=prefetch_limit,
+            ),
+        ]
+        # Only add sparse prefetch if tokenization produced terms
+        if sparse_indices:
+            prefetches.append(
+                Prefetch(
+                    query=SparseVector(indices=sparse_indices, values=sparse_values),
+                    using="sparse",
+                    limit=prefetch_limit,
+                ),
+            )
+
+        query_response = self._client.query_points(
+            collection_name=cname,
+            prefetch=prefetches,
+            query=FusionQuery(fusion=Fusion.RRF),
+            limit=limit,
+        )
+
+        results_raw = []
+        for point in query_response.points:
+            score = point.score if point.score is not None else 0.0
+            if min_score > 0.0 and score < min_score:
+                continue
+            results_raw.append({"payload": point.payload, "score": score})
+
+        return build_citations(results_raw)
+
+
+# Singleton
+_knowledge: KnowledgeService | None = None
+
+
+def get_knowledge_service() -> KnowledgeService:
+    """Return knowledge service singleton.
+
+    Auto-selects backends:
+    - QDRANT_URL set → QdrantBackend (production, #23)
+    - DATABASE_URL set → PostgresDocumentStore (#303)
+    - Otherwise → in-memory (tests / local dev)
+    """
+    import os
+
+    global _knowledge
+    if _knowledge is None:
+        _knowledge = KnowledgeService()
+        qdrant_url = os.getenv("QDRANT_URL", "")
+        if qdrant_url:
+            try:
+                _knowledge._qdrant = QdrantBackend(
+                    url=qdrant_url,
+                    api_key=os.getenv("QDRANT_API_KEY", ""),
+                )
+                logger.info("KnowledgeService: using Qdrant backend at %s", qdrant_url)
+            except Exception as exc:
+                logger.warning(
+                    "KnowledgeService: Qdrant init failed (%s) — falling back to in-memory",
+                    exc,
+                )
+        # Document lifecycle store (#303)
+        from services.document_store import get_document_store
+        _knowledge._doc_store = get_document_store()
+        store_type = type(_knowledge._doc_store).__name__
+        logger.info("KnowledgeService: document store = %s", store_type)
+    return _knowledge

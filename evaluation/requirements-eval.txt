@@ -1,0 +1,4 @@
+# Phase 1a evaluation dependencies (not runtime — install separately)
+# pip install -r evaluation/requirements-eval.txt
+ragas>=0.2.0
+openai>=1.0.0

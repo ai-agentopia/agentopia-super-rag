@@ -1,0 +1,83 @@
+{
+  "version": "1.0",
+  "phase": "1b",
+  "description": "Phase 1b labeled evaluation dataset — seed subset for Wave 1 harness validation. Authoritative baseline requires Wave 2 pilot/client data (#307).",
+  "grading_scale": {
+    "0": "irrelevant — chunk has no useful information for the query",
+    "1": "partially relevant — chunk contains related but incomplete information",
+    "2": "fully relevant — chunk directly answers or substantially addresses the query"
+  },
+  "wave": "1 — seed subset (5 queries, manually labeled). chunk_index values match test ingestion (0-based, single-chunk-per-doc). Wave 2 requires #307 pilot data with production chunk indices.",
+  "samples": [
+    {
+      "id": "lb01",
+      "query": "What chunking strategies does the knowledge system support?",
+      "scope": "test/platform-docs",
+      "scenario": "factual_recall",
+      "relevant_chunks": [
+        {
+          "source": "knowledge-architecture.md",
+          "chunk_index": 0,
+          "relevance": 2,
+          "reason": "Directly lists all chunking strategies with descriptions"
+        }
+      ]
+    },
+    {
+      "id": "lb02",
+      "query": "How does document deduplication work during ingestion?",
+      "scope": "test/platform-docs",
+      "scenario": "process_explanation",
+      "relevant_chunks": [
+        {
+          "source": "adr-012-ingestion.md",
+          "chunk_index": 0,
+          "relevance": 2,
+          "reason": "Describes SHA-256 hashing, two-phase atomic replace"
+        }
+      ]
+    },
+    {
+      "id": "lb03",
+      "query": "What authentication methods are used for knowledge routes?",
+      "scope": "test/platform-docs",
+      "scenario": "security_architecture",
+      "relevant_chunks": [
+        {
+          "source": "adr-010-runtime.md",
+          "chunk_index": 0,
+          "relevance": 2,
+          "reason": "Describes dual-path auth: operator session + bot bearer"
+        }
+      ]
+    },
+    {
+      "id": "lb04",
+      "query": "What is the maximum context token budget for knowledge injection?",
+      "scope": "test/platform-docs",
+      "scenario": "configuration_detail",
+      "relevant_chunks": [
+        {
+          "source": "gateway-plugin-config.md",
+          "chunk_index": 0,
+          "relevance": 2,
+          "reason": "Specifies maxContextTokens=3000 default, confidenceThreshold filtering"
+        }
+      ]
+    },
+    {
+      "id": "lb05",
+      "query": "How does the bot-scope binding work at runtime?",
+      "scope": "test/platform-docs",
+      "scenario": "runtime_architecture",
+      "relevant_chunks": [
+        {
+          "source": "bot-knowledge-index.md",
+          "chunk_index": 0,
+          "relevance": 2,
+          "reason": "Describes BotKnowledgeIndex singleton, CRD annotations, O(1) resolve"
+        }
+      ]
+    }
+  ]
+}
