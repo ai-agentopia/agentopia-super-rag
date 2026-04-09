@@ -83,43 +83,51 @@ Embedding model changes affect the entire vector space. They require:
 
 ---
 
-## W1 Promotion Gate Results — Markdown-Aware Chunking
+## W1 Evidence — Markdown-Aware Chunking
 
 **Date:** 2026-04-09  
 **Script:** `evaluation/w1_promotion_gate.py`  
 **Results:** `evaluation/results/w1_promotion_gate.json`
 
-### Part 1: Regression check (phase1b_labeled_seed.json, 5 queries)
+### Evidence 1: Regression check (phase1b_labeled_seed.json, 5 queries)
 
-Seed documents are plain text — both strategies produce identical chunks (fallback). Proves no regression.
+Seed documents are plain text — both strategies produce identical chunks (markdown-aware falls back to fixed-size when no headings or code fences are present). Proves no regression on existing behavior.
 
 | Metric | FIXED_SIZE | MARKDOWN_AWARE | Delta |
 |---|---|---|---|
-| nDCG@5 | 0.8774 | 0.8774 | **+0.0000** |
+| nDCG@5 | 0.8774 | 0.8774 | +0.0000 |
 | MRR | 0.8400 | 0.8400 | +0.0000 |
 
-### Part 2: W1 pilot (w1_markdown_pilot.json, 5 queries, markdown-structured docs)
+**Status:** Complete. No regression.
 
-Documents with headings, sections, and structured content — exercises the actual strategy.
+### Evidence 2: Synthetic markdown benchmark (w1_markdown_pilot.json, 5 queries)
+
+Synthetic corpus with markdown-structured documents (headings, sections). Demonstrates that heading-aware chunking improves retrieval when documents have markdown structure. This is a **synthetic benchmark**, not a real production pilot scope.
 
 | Metric | FIXED_SIZE | MARKDOWN_AWARE | Delta |
 |---|---|---|---|
-| nDCG@5 | 0.5861 | **0.9956** | **+0.4095** |
+| nDCG@5 | 0.5861 | **0.9956** | +0.4095 |
 | MRR | 0.5167 | **1.0000** | +0.4833 |
 | P@5 | 0.2000 | **0.3200** | +0.1200 |
 | R@5 | 0.5000 | **0.8333** | +0.3333 |
 
-### Gate decision
+**Status:** Complete. Strong directional signal that markdown-aware improves retrieval on structured docs.
 
-- Regression check: PASS (nDCG@5 delta = +0.0000)
-- W1 pilot: PASS (nDCG@5 delta = +0.4095)
-- **Gate: PASSED**
+### Real pilot-scope promotion gate: NOT YET EXECUTED
 
-### Rollout recommendation
+The full promotion gate (per "For chunking strategy changes" above) requires:
+1. Enable markdown-aware on a **real production pilot scope** with actual client documents
+2. Run the **full golden question set** for that scope (not a synthetic dataset)
+3. Verify nDCG@5 does not regress more than 0.01 from baseline
 
-Safe as opt-in for documentation-heavy scopes. NOT recommended as default until validated on at least 3 production scopes per promotion gate rules above.
+This has **not been done**. W1 remains opt-in and is NOT promoted for production use until a real pilot-scope evaluation is completed.
 
-**Rollout recommendation:** Implemented and available as opt-in. Do NOT enable on production scopes until the full promotion gate above is executed.
+### Current W1 status
+
+- Implementation: complete, merged, opt-in only
+- Regression check: complete, no regression
+- Synthetic benchmark: complete, strong positive signal
+- Real pilot-scope gate: **pending** — requires a production scope with documents and a labeled golden question set
 
 ---
 

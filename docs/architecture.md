@@ -125,7 +125,7 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 **Status:** Implemented. Opt-in only — must be explicitly requested via `chunking_strategy: "markdown_aware"` in IngestConfig. Default remains `fixed_size`.
 
-**Evaluation:** W1 promotion gate PASSED. Regression check (seed dataset): zero regression. W1 pilot (markdown-structured docs): nDCG@5 improved from 0.5861 to 0.9956 (+0.4095). See `evaluation/results/w1_promotion_gate.json` and `docs/evaluation.md` for full results.
+**Evaluation:** Regression check passed (zero regression on seed dataset). Synthetic markdown benchmark shows strong improvement (nDCG@5 +0.4095). Real pilot-scope promotion gate has not been executed — W1 is not promoted for production use. See `docs/evaluation.md` for details and remaining gate steps.
 
 ### Sparse index / hybrid retrieval (BM25 + dense)
 
