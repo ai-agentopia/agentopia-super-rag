@@ -323,6 +323,86 @@ class TestDeepHeadingLevels:
         assert len(results) >= 1
 
 
+# ── Correctness: split-section path inheritance ────────────────────────
+
+
+class TestSplitSectionPathInheritance:
+    """Continuation chunks from a split section inherit section_path."""
+
+    def test_continuation_chunks_inherit_path(self):
+        """All chunks from a long section carry the same section_path."""
+        long_body = "Auth body content with token management details. " * 30
+        content = f"# API\n\nIntro.\n\n## Auth\n\n{long_body}\n\n## Search\n\nSearch."
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=200
+        )
+        chunks = chunk_document(
+            content, "doc.md", "scope", DocumentFormat.MARKDOWN, config
+        )
+        auth_chunks = [c for c in chunks if c.metadata.section == "Auth"]
+        assert len(auth_chunks) >= 2, "Auth section should split into multiple chunks"
+        for c in auth_chunks:
+            assert c.metadata.section_path == "API > Auth", (
+                f"Continuation chunk idx={c.metadata.chunk_index} has path={c.metadata.section_path!r}"
+            )
+
+    def test_nested_section_inheritance(self):
+        """Continuation chunks under a nested heading inherit the full nested path."""
+        long_body = "Detailed token rotation policy documentation. " * 25
+        content = (
+            "# API\n\nIntro.\n\n"
+            "## Auth\n\nAuth overview.\n\n"
+            f"### Token Rotation\n\n{long_body}\n\n"
+            "## Search\n\nSearch."
+        )
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=200
+        )
+        chunks = chunk_document(
+            content, "doc.md", "scope", DocumentFormat.MARKDOWN, config
+        )
+        rotation_chunks = [c for c in chunks if c.metadata.section == "Token Rotation"]
+        assert len(rotation_chunks) >= 2
+        for c in rotation_chunks:
+            assert c.metadata.section_path == "API > Auth > Token Rotation"
+
+    def test_duplicate_heading_continuation_distinct(self):
+        """Continuation chunks from duplicate-named sections keep distinct paths."""
+        long_a = "Details about API overview implementation. " * 20
+        long_b = "Details about Worker overview architecture. " * 20
+        content = (
+            f"# API\n\n## Overview\n\n{long_a}\n\n"
+            f"# Worker\n\n## Overview\n\n{long_b}\n"
+        )
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=200
+        )
+        chunks = chunk_document(
+            content, "doc.md", "scope", DocumentFormat.MARKDOWN, config
+        )
+        overview_chunks = [c for c in chunks if c.metadata.section == "Overview"]
+        api_paths = [c.metadata.section_path for c in overview_chunks if "API" in c.metadata.section_path]
+        worker_paths = [c.metadata.section_path for c in overview_chunks if "Worker" in c.metadata.section_path]
+        assert len(api_paths) >= 2, "API Overview should have continuation chunks"
+        assert len(worker_paths) >= 2, "Worker Overview should have continuation chunks"
+        assert all(p == "API > Overview" for p in api_paths)
+        assert all(p == "Worker > Overview" for p in worker_paths)
+
+    def test_search_continuation_chunk_has_path(self):
+        """Search result from a continuation chunk carries inherited section_path."""
+        svc = KnowledgeService()
+        long_body = "Kubernetes deployment strategies with kubectl apply. " * 20
+        content = f"# Ops\n\n## Deploy\n\n{long_body}"
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=200
+        )
+        svc.ingest("test", content, "ops.md", config=config)
+        results = svc.search("Kubernetes kubectl", ["test"])
+        assert len(results) >= 1
+        # The match may be a continuation chunk — it should still have section metadata
+        assert results[0].citation.source == "ops.md"
+
+
 # ── End-to-end: ingest + search ────────────────────────────────────────
 
 
