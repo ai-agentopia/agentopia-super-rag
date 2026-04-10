@@ -65,8 +65,10 @@ def chunk_document(
 
     Returns list of DocumentChunks ready for embedding.
     """
+    section_paths = None
     if config.chunking_strategy == ChunkingStrategy.MARKDOWN_AWARE:
         texts = _chunk_markdown_aware(content, config.chunk_size)
+        section_paths = _build_section_paths(content)
     elif config.chunking_strategy == ChunkingStrategy.PARAGRAPH:
         texts = _chunk_by_paragraph(content, config.chunk_size)
     elif config.chunking_strategy == ChunkingStrategy.CODE_AWARE:
@@ -78,6 +80,10 @@ def chunk_document(
     for i, text in enumerate(texts):
         if not text.strip():
             continue
+        section = _extract_section(text)
+        section_path = ""
+        if section_paths and section:
+            section_path = section_paths.get(section, section)
         chunks.append(
             DocumentChunk(
                 text=text,
@@ -85,7 +91,8 @@ def chunk_document(
                     source=source,
                     format=format,
                     scope=scope,
-                    section=_extract_section(text),
+                    section=section,
+                    section_path=section_path,
                     chunk_index=i,
                     total_chunks=len(texts),
                     ingested_at=ingested_at,
@@ -371,6 +378,44 @@ def _split_oversized_block(block: str, max_size: int) -> list[str]:
     return result
 
 
+def _build_section_paths(content: str) -> dict[str, str]:
+    """Build heading hierarchy paths from document content (W1.5 #25).
+
+    Scans all headings in the document and builds a breadcrumb path for each.
+    Returns a dict mapping heading text → full path (e.g., "Auth > Token Mgmt").
+
+    Heading levels (H1-H6) define the hierarchy:
+    - H1 resets the entire path
+    - H2 under H1 produces "H1 > H2"
+    - H3 under H2 produces "H1 > H2 > H3"
+    - A heading at the same or higher level pops the stack
+    """
+    import re
+
+    paths: dict[str, str] = {}
+    # Stack of (level, heading_text) tracking current hierarchy
+    stack: list[tuple[int, str]] = []
+
+    for line in content.split("\n"):
+        match = re.match(r"^(#{1,6})\s+(.+)$", line.strip())
+        if not match:
+            continue
+        level = len(match.group(1))
+        heading = match.group(2).strip()
+
+        # Pop headings at same or deeper level (new sibling or parent)
+        while stack and stack[-1][0] >= level:
+            stack.pop()
+
+        stack.append((level, heading))
+
+        # Build path from stack
+        path = " > ".join(h for _, h in stack)
+        paths[heading] = path
+
+    return paths
+
+
 def _extract_section(text: str) -> str:
     """Extract section heading from chunk text."""
     import re
@@ -393,6 +438,7 @@ def build_citations(results: list[dict[str, Any]]) -> list[SearchResult]:
                 citation=Citation(
                     source=metadata.get("source", ""),
                     section=metadata.get("section", ""),
+                    section_path=metadata.get("section_path", ""),
                     page=metadata.get("page"),
                     chunk_index=metadata.get("chunk_index", 0),
                     score=r.get("score", 0.0),
