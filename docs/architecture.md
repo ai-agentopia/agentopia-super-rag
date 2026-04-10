@@ -137,15 +137,15 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 BM25 sparse encoding alongside dense vectors. Score fusion via RRF. Issue tracked in `agentopia-protocol` as #319. Will require Qdrant sparse vector support and per-scope evaluation.
 
-### Query expansion (W3a — shipped, opt-in)
+### Query expansion (W3a — implemented, not yet production-accepted)
 
-`query_expansion=true` search parameter generates 3 alternative phrasings via LLM, runs retrieval for original + 3 expansions, and merges results via RRF (Reciprocal Rank Fusion). Disabled by default on all scopes.
+Generates 3 alternative phrasings via LLM, runs retrieval for original + 3 expansions, merges via RRF. Disabled by default on all scopes.
 
-**Cost/latency:** 1 LLM call (~300-800ms) + 3 extra retrieval queries + 3 extra embedding calls per search. Estimated +300-1000ms total. Requires CTO latency budget approval before any production scope enablement.
+**Rollout control:** Per-scope allowlist via `QUERY_EXPANSION_SCOPES` env var (comma-separated scope names) or `enable_query_expansion(scope)` API. Search parameter `query_expansion=true` is ignored unless the scope is in the allowlist. Circuit breaker: LLM failure → silent fallback to dense-only.
 
-**Evaluation:** Simulated-expansion comparison on `joblogic-kb/api-docs` (10 queries): nDCG@5 0.7917 → 0.8568 (+0.0652). Live LLM evaluation pending latency budget approval. See `evaluation/results/w3a_expansion_comparison.json`.
+**Cost/latency:** 1 LLM call (~300-800ms) + 3 extra retrieval/embedding calls per search. Estimated +300-1000ms total. CTO latency budget approval required before production enablement.
 
-**Rollout:** Per-scope opt-in only via `query_expansion=true` search parameter. Circuit breaker: if LLM call fails, falls back silently to dense-only search.
+**Evaluation:** Simulated-expansion comparison complete (nDCG@5 +0.0652 on pilot scope). Live LLM evaluation pending — requires `OPENROUTER_API_KEY` in dev environment and CTO latency budget pre-approval. See `evaluation/results/w3a_expansion_comparison.json`.
 
 ### HyDE (Hypothetical Document Embedding)
 

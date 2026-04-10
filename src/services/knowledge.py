@@ -7,6 +7,7 @@ Operator reads/writes: bot-config-api → knowledge-api proxy (#320).
 
 import hashlib
 import logging
+import os
 import time
 from typing import Any
 
@@ -532,6 +533,27 @@ class KnowledgeService:
             None  # injected by get_knowledge_service()
         )
         self._doc_store: "DocumentStore | None" = None  # injected by get_knowledge_service()
+        # W3a: per-scope query expansion allowlist. Only scopes in this set
+        # may use query expansion. Populated from QUERY_EXPANSION_SCOPES env
+        # var (comma-separated) or via enable_query_expansion() method.
+        self._expansion_allowed_scopes: set[str] = set()
+        _env_scopes = os.getenv("QUERY_EXPANSION_SCOPES", "")
+        if _env_scopes:
+            self._expansion_allowed_scopes = {s.strip() for s in _env_scopes.split(",") if s.strip()}
+
+    def enable_query_expansion(self, scope: str) -> None:
+        """Enable query expansion for a specific scope (W3a #16)."""
+        self._expansion_allowed_scopes.add(scope)
+        logger.info("W3a: query expansion enabled for scope '%s'", scope)
+
+    def disable_query_expansion(self, scope: str) -> None:
+        """Disable query expansion for a specific scope (W3a #16)."""
+        self._expansion_allowed_scopes.discard(scope)
+        logger.info("W3a: query expansion disabled for scope '%s'", scope)
+
+    def is_expansion_allowed(self, scopes: list[str]) -> bool:
+        """Check if query expansion is allowed for any of the given scopes."""
+        return any(s in self._expansion_allowed_scopes for s in scopes)
 
     def ingest(
         self,
@@ -703,9 +725,15 @@ class KnowledgeService:
         """
         # Qdrant path: fan-out across scopes, merge, sort, limit
         if self._qdrant:
-            if query_expansion_enabled:
+            # W3a: expansion only if requested AND scope is in the allowlist
+            if query_expansion_enabled and self.is_expansion_allowed(scopes):
                 return self._search_with_expansion(
                     query, scopes, limit, min_score, query_expansion_n
+                )
+            elif query_expansion_enabled:
+                logger.info(
+                    "W3a: expansion requested but not allowed for scopes %s — using dense-only",
+                    scopes,
                 )
             all_results: list[SearchResult] = []
             for scope in scopes:
