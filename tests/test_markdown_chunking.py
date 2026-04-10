@@ -195,6 +195,99 @@ class TestMarkdownAwareChunking:
         assert md_chunks == fs_chunks
 
 
+# ── Remediation: heading-only invariant + HR filtering ──────────────────
+
+
+class TestHeadingNeverStandalone:
+    """Headings must NEVER be emitted as standalone chunks (W1 remediation)."""
+
+    def test_heading_plus_oversized_single_line_body(self):
+        """Heading followed by a single line > max_size stays attached."""
+        content = "# Heading\n" + ("A" * 1000)
+        chunks = _chunk_markdown_aware(content, max_size=100)
+        # First chunk must start with the heading
+        assert chunks[0].startswith("# Heading")
+        # No chunk should be a standalone heading
+        for c in chunks:
+            stripped = c.strip()
+            if stripped.startswith("#") and "\n" not in stripped:
+                assert len(stripped) > 50, f"Standalone heading escaped: {stripped!r}"
+
+    def test_heading_blank_line_then_oversized_body(self):
+        """Heading + blank line + oversized body — heading stays attached."""
+        content = "# Title\n\n" + ("B" * 1000)
+        chunks = _chunk_markdown_aware(content, max_size=100)
+        assert chunks[0].startswith("# Title")
+        for c in chunks:
+            stripped = c.strip()
+            if stripped.startswith("#") and "\n" not in stripped:
+                assert len(stripped) > 50, f"Standalone heading escaped: {stripped!r}"
+
+    def test_heading_with_normal_body_merged(self):
+        """Heading + short body within max_size stays in one chunk."""
+        content = "## Section\n\nShort content here."
+        chunks = _chunk_markdown_aware(content, max_size=500)
+        assert len(chunks) == 1
+        assert "## Section" in chunks[0]
+        assert "Short content here." in chunks[0]
+
+    def test_heading_at_end_of_document(self):
+        """Trailing heading with no following content is emitted (unavoidable)."""
+        content = "Some text.\n\n# Trailing"
+        chunks = _chunk_markdown_aware(content, max_size=500)
+        # The trailing heading has no content to attach to — this is acceptable
+        assert any("# Trailing" in c for c in chunks)
+
+    def test_multiple_headings_none_standalone(self):
+        """Multiple headings in a real document — none emitted standalone."""
+        content = (
+            "# Title\n\nIntro paragraph.\n\n"
+            "## Section A\n\nContent A.\n\n"
+            "## Section B\n\nContent B.\n\n"
+            "## Section C\n\n" + ("C" * 600)  # oversized body
+        )
+        chunks = _chunk_markdown_aware(content, max_size=200)
+        for c in chunks:
+            stripped = c.strip()
+            # If it starts with # and has no newline, it must not be a tiny heading
+            if stripped.startswith("#") and "\n" not in stripped:
+                # Trailing heading is acceptable, standalone short heading is not
+                assert stripped == "# Trailing" or len(stripped) > 50, \
+                    f"Standalone heading escaped: {stripped!r}"
+
+
+class TestHorizontalRuleFiltering:
+    """Horizontal rules (---) must be dropped, not emitted as chunks."""
+
+    def test_hr_not_emitted(self):
+        """--- separators produce no standalone chunks."""
+        content = "# Section A\n\nContent A.\n\n---\n\n# Section B\n\nContent B."
+        chunks = _chunk_markdown_aware(content, max_size=500)
+        for c in chunks:
+            assert c.strip() != "---", "HR should be filtered"
+            assert c.strip() != "----"
+            assert c.strip() != "-----"
+
+    def test_hr_variants_filtered(self):
+        """---, ----, ----- are all filtered."""
+        content = "# A\n\nText.\n\n---\n\n# B\n\nText.\n\n----\n\n# C\n\nText.\n\n-----"
+        chunks = _chunk_markdown_aware(content, max_size=500)
+        for c in chunks:
+            assert c.strip() not in ("---", "----", "-----")
+
+    def test_hr_does_not_break_heading_merge(self):
+        """HR between heading and content does not prevent heading-content merge."""
+        content = "# Title\n\nParagraph content here."
+        chunks_no_hr = _chunk_markdown_aware(content, max_size=500)
+        content_with_hr = "# Title\n\n---\n\nParagraph content here."
+        chunks_with_hr = _chunk_markdown_aware(content_with_hr, max_size=500)
+        # Both should merge heading with content
+        assert len(chunks_no_hr) == 1
+        assert len(chunks_with_hr) == 1
+        assert "# Title" in chunks_with_hr[0]
+        assert "Paragraph content" in chunks_with_hr[0]
+
+
 # ── Unit: _split_oversized_block ────────────────────────────────────────
 
 

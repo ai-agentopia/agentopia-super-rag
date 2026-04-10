@@ -1,6 +1,6 @@
 {
   "evaluation": "w1_real_pilot_gate",
-  "timestamp": "2026-04-09T23:41:29Z",
+  "timestamp": "2026-04-10T01:09:18Z",
   "pilot_scope": "joblogic-kb/api-docs",
   "dataset": "w1_real_pilot.json",
   "dataset_queries": 10,
@@ -127,7 +127,7 @@
   },
   "candidate": {
     "strategy": "markdown_aware",
-    "total_chunks": 348,
+    "total_chunks": 349,
     "aggregates": {
       "ndcg": {
         "mean": 0.7917,
