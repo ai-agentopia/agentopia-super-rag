@@ -686,15 +686,27 @@ class KnowledgeService:
         scopes: list[str],
         limit: int = 5,
         min_score: float = 0.0,
+        query_expansion_enabled: bool = False,
+        query_expansion_n: int = 3,
     ) -> list[SearchResult]:
         """Search across knowledge scopes.
 
         Routes to Qdrant vector similarity search when backend is configured (#23),
         otherwise falls back to in-memory text matching (tests / local dev).
         Emits per-result provenance audit log (ADR-011 §5).
+
+        When query_expansion_enabled=True (W3a #16):
+        1. Generate N alternative phrasings via LLM
+        2. Run retrieval for original + N expansions
+        3. Merge results via RRF (Reciprocal Rank Fusion)
+        4. On LLM failure, fall back silently to dense-only search
         """
         # Qdrant path: fan-out across scopes, merge, sort, limit
         if self._qdrant:
+            if query_expansion_enabled:
+                return self._search_with_expansion(
+                    query, scopes, limit, min_score, query_expansion_n
+                )
             all_results: list[SearchResult] = []
             for scope in scopes:
                 try:
@@ -742,6 +754,90 @@ class KnowledgeService:
                     )
         results.sort(key=lambda r: r.score, reverse=True)
         final = results[:limit]
+        self._audit_search_results(final)
+        return final
+
+    def _search_with_expansion(
+        self,
+        query: str,
+        scopes: list[str],
+        limit: int,
+        min_score: float,
+        n: int,
+    ) -> list[SearchResult]:
+        """Search with query expansion (W3a #16).
+
+        1. Generate N alternative phrasings via LLM
+        2. Run retrieval for original + N expansions
+        3. Merge results via RRF
+        4. On LLM failure, fall back to dense-only search
+        """
+        from services.query_expansion import expand_query, rrf_merge
+
+        t0 = time.monotonic()
+        phrasings = expand_query(query, n=n)
+        expansion_ms = (time.monotonic() - t0) * 1000
+
+        all_queries = [query] + phrasings
+        logger.info(
+            "W3a: searching with %d queries (1 original + %d expansions, %.0fms expansion)",
+            len(all_queries), len(phrasings), expansion_ms,
+        )
+
+        # Run retrieval for each query
+        ranked_lists: list[list[dict]] = []
+        for q in all_queries:
+            results_for_q: list[dict] = []
+            for scope in scopes:
+                try:
+                    sr_list = self._qdrant.search_scope(q, scope, limit, min_score=min_score)
+                    for sr in sr_list:
+                        results_for_q.append({
+                            "text": sr.text,
+                            "score": sr.score,
+                            "scope": sr.scope,
+                            "citation": {
+                                "source": sr.citation.source,
+                                "section": sr.citation.section,
+                                "section_path": sr.citation.section_path,
+                                "page": sr.citation.page,
+                                "chunk_index": sr.citation.chunk_index,
+                                "ingested_at": sr.citation.ingested_at,
+                                "document_hash": sr.citation.document_hash,
+                            },
+                        })
+                except Exception as exc:
+                    logger.warning("W3a search failed for scope '%s': %s", scope, exc)
+            ranked_lists.append(results_for_q)
+
+        # Merge via RRF
+        merged = rrf_merge(ranked_lists, limit)
+
+        # Convert back to SearchResult
+        final = []
+        for r in merged:
+            cit = r.get("citation", {})
+            final.append(SearchResult(
+                text=r.get("text", ""),
+                score=r.get("score", 0.0),
+                scope=r.get("scope", ""),
+                citation=Citation(
+                    source=cit.get("source", ""),
+                    section=cit.get("section", ""),
+                    section_path=cit.get("section_path", ""),
+                    page=cit.get("page"),
+                    chunk_index=cit.get("chunk_index", 0),
+                    score=r.get("score", 0.0),
+                    ingested_at=cit.get("ingested_at", 0.0),
+                    document_hash=cit.get("document_hash", ""),
+                ),
+            ))
+
+        total_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "W3a: completed in %.0fms (expansion=%.0fms, retrieval=%.0fms, results=%d)",
+            total_ms, expansion_ms, total_ms - expansion_ms, len(final),
+        )
         self._audit_search_results(final)
         return final
 
