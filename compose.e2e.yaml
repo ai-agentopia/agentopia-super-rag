@@ -1,0 +1,33 @@
+# compose.e2e.yaml — E2E overlay for compose.yaml
+#
+# Adds a deterministic local embedding stub so E2E tests run without an
+# OpenRouter key. The stub produces real 1536d vectors into real Qdrant —
+# it is a local embedding provider, not a mock of the retrieval path.
+#
+# Usage:
+#   podman compose -f compose.yaml -f compose.e2e.yaml --env-file .env.e2e up -d --build
+#   python -m pytest tests/e2e/ -m e2e -v
+#   podman compose -f compose.yaml -f compose.e2e.yaml down -v
+
+services:
+
+  embedding-stub:
+    build:
+      context: e2e
+      dockerfile: Dockerfile.stub
+    ports:
+      - "9999:9999"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/9999'"]
+      interval: 5s
+      timeout: 3s
+      retries: 6
+      start_period: 3s
+
+  knowledge-api:
+    environment:
+      EMBEDDING_BASE_URL: http://embedding-stub:9999/embeddings
+      EMBEDDING_API_KEY: stub-key
+    depends_on:
+      embedding-stub:
+        condition: service_healthy

@@ -284,5 +284,6 @@ See [docs/evaluation.md](docs/evaluation.md) for gate definitions and W-series e
 | Extraction from monorepo | [docs/migration.md](docs/migration.md) |
 | Retrieval quality evaluation | [docs/evaluation.md](docs/evaluation.md) |
 | Runtime config and operations | [docs/operations.md](docs/operations.md) |
+| E2E integration testing | [docs/e2e.md](docs/e2e.md) |
 | Wiki-RAG evolution plan | [docs/architecture.md#planned-evolution](docs/architecture.md#planned-evolution) |
 | Public architecture docs | [ai-agentopia/docs/architecture/super-rag-blueprint.md](https://github.com/ai-agentopia/docs/blob/main/architecture/super-rag-blueprint.md) |
