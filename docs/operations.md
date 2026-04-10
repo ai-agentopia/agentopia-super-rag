@@ -80,6 +80,19 @@ This endpoint requires `X-Internal-Token`.
 
 ---
 
+## Database Schema
+
+Postgres requires two migrations applied in order:
+
+```bash
+psql -d <database> -f db/022_document_records.sql   # document lifecycle table
+psql -d agentopia -f db/023_source_type.sql         # source_type column
+```
+
+These are idempotent (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`).
+
+---
+
 ## Deployment Flow
 
 1. Push to `main` branch in `agentopia-super-rag` (this repo — main-only, no dev/uat branches)

@@ -65,30 +65,132 @@ K8s API access uses in-cluster service account. In local dev, binding cache fall
 
 ## Local Dev Workflow
 
+### Prerequisites
+
+- Python ≥ 3.12
+- Docker or Podman (for container workflows)
+- Qdrant and Postgres (for full ingest + search — see [Local Dependencies](#local-dependencies) below)
+- OpenRouter API key (for embedding — `text-embedding-3-small` via OpenRouter)
+
+### 1. Native Python
+
 ```bash
-# Clone and install dependencies
 git clone git@github.com:ai-agentopia/agentopia-super-rag.git
 cd agentopia-super-rag
+
+# Create venv and install all dependencies (includes python-multipart, psycopg, etc.)
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Start service (requires Qdrant + Postgres)
-export QDRANT_URL=http://localhost:6333
-export POSTGRES_DSN=postgresql://user:pass@localhost:5432/agentopia
-export EMBEDDING_API_URL=https://openrouter.ai/api/v1/embeddings
-export EMBEDDING_API_KEY=<key>
-export KNOWLEDGE_API_INTERNAL_TOKEN=<token>
-export K8S_NAMESPACE=agentopia
+# Set up env vars
+cp .env.example .env.local
+# edit .env.local with your OpenRouter key, token, and local service URLs
+set -a && source .env.local && set +a
 
+# Run the service
 cd src && uvicorn main:app --host 0.0.0.0 --port 8002 --reload
-
-# Fast gate (no external deps)
-PYTHONPATH=src python -m pytest tests/ -m "not integration and not e2e" -x -q
-
-# Integration gate (requires Qdrant + Postgres)
-PYTHONPATH=src python -m pytest tests/ -m "integration" -x -q
 ```
 
-> **`python-multipart` is required.** FastAPI enforces this at route-registration time. Without it, `from main import app` raises `RuntimeError` and `uvicorn main:app` will not start. Install with `pip install python-multipart`. Tests that do not import the full app (service-layer and model tests) still run without it, but any test or tool that imports the FastAPI app will fail.
+Smoke check:
+```bash
+curl http://localhost:8002/health
+# → {"status":"ok","service":"knowledge-api","version":"1.0.0"}
+```
+
+Without Qdrant/Postgres configured, the service starts in in-memory fallback mode (no persistent search or document lifecycle — useful for feature development only).
+
+### 2. Test gate
+
+```bash
+# Fast gate — no external dependencies required (runs from repo root)
+python -m pytest tests/ -m "not integration and not e2e" -x -q
+# → 421 passed, 23 skipped (validated)
+```
+
+The `integration` and `e2e` markers are defined for future use. No tests are currently marked with them — the fast gate is the complete test gate.
+
+### 3. Local Dependencies
+
+Start Qdrant and Postgres locally with Podman (or Docker, substituting `podman` → `docker`):
+
+```bash
+# Qdrant vector store
+podman run -d --name qdrant -p 6333:6333 qdrant/qdrant:latest
+
+# Postgres document store
+podman run -d --name agentopia-pg \
+  -e POSTGRES_DB=agentopia \
+  -e POSTGRES_USER=agentopia \
+  -e POSTGRES_PASSWORD=agentopia \
+  -p 5432:5432 \
+  postgres:16
+
+# Apply schema migrations (wait ~5s for Postgres to initialize)
+sleep 5
+PGPASSWORD=agentopia psql -h localhost -U agentopia -d agentopia \
+  -f db/022_document_records.sql \
+  -f db/023_source_type.sql
+```
+
+### 4. Container paths
+
+**Build:**
+
+```bash
+# Docker
+docker build -t agentopia-super-rag:local .
+
+# Podman
+podman build -t agentopia-super-rag:local .
+```
+
+**Podman smoke run (in-memory mode — no Qdrant/Postgres needed):**
+
+```bash
+podman run --rm -p 8002:8002 \
+  -e KNOWLEDGE_API_INTERNAL_TOKEN=local-test \
+  agentopia-super-rag:local
+
+curl http://localhost:8002/health
+# → {"status":"ok","service":"knowledge-api","version":"1.0.0"}
+```
+
+**Podman full stack (all three services in a shared pod):**
+
+```bash
+podman pod create --name agentopia-local -p 8002:8002 -p 6333:6333 -p 5432:5432
+
+podman run -d --pod agentopia-local --name qdrant qdrant/qdrant:latest
+
+podman run -d --pod agentopia-local --name agentopia-pg \
+  -e POSTGRES_DB=agentopia \
+  -e POSTGRES_USER=agentopia \
+  -e POSTGRES_PASSWORD=agentopia \
+  postgres:16
+
+sleep 5
+PGPASSWORD=agentopia psql -h localhost -U agentopia -d agentopia \
+  -f db/022_document_records.sql \
+  -f db/023_source_type.sql
+
+podman run -d --pod agentopia-local --name agentopia-rag \
+  --env-file .env.local \
+  agentopia-super-rag:local
+```
+
+Within a pod all containers share the same network namespace, so `QDRANT_URL=http://localhost:6333` and `POSTGRES_DSN=postgresql://...@localhost:5432/agentopia` work correctly on both Linux and macOS.
+
+Smoke checks after startup:
+```bash
+curl http://localhost:8002/health
+# → {"status":"ok","service":"knowledge-api","version":"1.0.0"}
+
+curl -H "X-Internal-Token: local-dev-token" http://localhost:8002/internal/health
+# → {"status":"ok","qdrant":"ok",...}
+
+curl -H "X-Internal-Token: local-dev-token" http://localhost:8002/api/v1/knowledge/scopes
+# → {"scopes":[],"count":0}
+```
 
 ---
 
