@@ -725,28 +725,53 @@ class KnowledgeService:
         """
         # Qdrant path: fan-out across scopes, merge, sort, limit
         if self._qdrant:
-            # W3a: expansion only if requested AND scope is in the allowlist
-            if query_expansion_enabled and self.is_expansion_allowed(scopes):
-                return self._search_with_expansion(
-                    query, scopes, limit, min_score, query_expansion_n
-                )
-            elif query_expansion_enabled:
-                logger.info(
-                    "W3a: expansion requested but not allowed for scopes %s — using dense-only",
-                    scopes,
-                )
-            all_results: list[SearchResult] = []
+            if query_expansion_enabled:
+                # W3a: split scopes into allowed (expansion) vs blocked (dense-only)
+                allowed = [s for s in scopes if s in self._expansion_allowed_scopes]
+                blocked = [s for s in scopes if s not in self._expansion_allowed_scopes]
+
+                all_results: list[SearchResult] = []
+
+                # Expanded retrieval for allowed scopes only
+                if allowed:
+                    all_results.extend(
+                        self._search_with_expansion(
+                            query, allowed, limit, min_score, query_expansion_n
+                        )
+                    )
+
+                # Dense-only retrieval for blocked scopes
+                for scope in blocked:
+                    try:
+                        all_results.extend(
+                            self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+                        )
+                    except Exception as exc:
+                        logger.warning("Qdrant search failed for scope '%s': %s", scope, exc)
+
+                if blocked:
+                    logger.info(
+                        "W3a: expansion applied to %s, dense-only for %s",
+                        allowed, blocked,
+                    )
+
+                all_results.sort(key=lambda r: r.score, reverse=True)
+                final = all_results[:limit]
+                self._audit_search_results(final)
+                return final
+
+            all_results_dense: list[SearchResult] = []
             for scope in scopes:
                 try:
-                    all_results.extend(
+                    all_results_dense.extend(
                         self._qdrant.search_scope(query, scope, limit, min_score=min_score)
                     )
                 except Exception as exc:
                     logger.warning(
                         "Qdrant search failed for scope '%s': %s", scope, exc
                     )
-            all_results.sort(key=lambda r: r.score, reverse=True)
-            final = all_results[:limit]
+            all_results_dense.sort(key=lambda r: r.score, reverse=True)
+            final = all_results_dense[:limit]
             self._audit_search_results(final)
             return final
 
