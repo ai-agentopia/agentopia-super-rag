@@ -1,9 +1,7 @@
-"""knowledge-api — Production-grade RAG service (#320, Phase 2b).
+"""knowledge-api — Production-grade RAG service.
 
-EXTRACTION FROZEN (2026-04-09): This service is being extracted to ai-agentopia/agentopia-super-rag.
-No new features. Bug fixes only. See agentopia-protocol#387 and agentopia-super-rag for tracking.
-
-Standalone service in agentopia-protocol monorepo.
+Standalone FastAPI service. Source of truth: ai-agentopia/agentopia-super-rag.
+Extraction from agentopia-protocol complete 2026-04-09.
 
 Routes:
   GET/POST/DELETE /api/v1/knowledge/* — knowledge management

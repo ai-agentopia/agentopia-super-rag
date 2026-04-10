@@ -22,15 +22,18 @@ These metrics were established during the Super RAG production milestone (Phase 
 ### Location (current source)
 
 ```
-agentopia-protocol/knowledge-api/src/evaluation/
-├── datasets/              ← labeled question sets per scope
-├── retrieval_metrics.py   ← nDCG, MRR, P@k, R@k computation
-├── phase1a_runner.py      ← Phase 1a evaluation runner
-├── phase1b_baseline.py    ← Phase 1b dense-only baseline
-├── e2e_baseline_test.py   ← end-to-end baseline smoke test
-├── run_phase2a_comparison.py      ← Phase 2a sparse index comparison
-├── run_phase2a_full_comparison.py ← Phase 2a full scope comparison
-└── results/               ← stored evaluation outputs
+evaluation/
+├── datasets/                       ← labeled question sets per scope
+├── retrieval_metrics.py            ← nDCG, MRR, P@k, R@k computation
+├── phase1a_runner.py               ← Phase 1a evaluation runner
+├── phase1b_baseline.py             ← Phase 1b dense-only baseline
+├── e2e_baseline_test.py            ← end-to-end baseline smoke test
+├── run_phase2a_comparison.py       ← Phase 2a sparse index comparison
+├── run_phase2a_full_comparison.py  ← Phase 2a full scope comparison
+├── w1_promotion_gate.py            ← W1 markdown-aware promotion gate
+├── w1_real_pilot_gate.py           ← W1 real pilot scope gate
+├── w3a_expansion_comparison.py     ← W3a query expansion evaluation
+└── results/                        ← stored evaluation outputs
 ```
 
 ### Golden question format
@@ -43,8 +46,8 @@ Each question set consists of:
 ### How evaluation runs
 
 ```bash
-# From knowledge-api/src/evaluation/
-python phase1b_baseline.py --scope acme-corp/api-docs --qdrant-url http://localhost:6333
+# From repo root
+PYTHONPATH=src python evaluation/phase1b_baseline.py --scope acme-corp/api-docs --qdrant-url http://localhost:6333
 ```
 
 Output: per-question scores, aggregate nDCG/MRR/P@k/R@k, comparison delta if baseline file provided.

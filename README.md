@@ -2,7 +2,7 @@
 
 Governed, multi-tenant retrieval service for the Agentopia platform.
 
-This repo will own the extraction of `knowledge-api` from `agentopia-protocol`. Until extraction is complete, the production service lives in `agentopia-protocol/knowledge-api/`. See [docs/migration.md](docs/migration.md) for the current migration phase.
+This is the production source for the knowledge-api service. Extraction from `agentopia-protocol` is complete. See [docs/migration.md](docs/migration.md) for the historical record.
 
 ---
 
@@ -65,33 +65,12 @@ K8s API access uses in-cluster service account. In local dev, binding cache fall
 
 ## Local Dev Workflow
 
-> **Phase 1 (current):** Repo is bootstrapped. Service source has not been extracted yet.
-> Local dev for the running service still runs from `agentopia-protocol/knowledge-api/`.
-> Phase 2 will enable local dev from this repo.
-
-### What you can do now (Phase 1)
-
 ```bash
 # Clone and install dependencies
 git clone git@github.com:ai-agentopia/agentopia-super-rag.git
 cd agentopia-super-rag
 pip install -r requirements.txt
 
-# Run fast gate (passes with 0 tests in Phase 1 — expected)
-python -m pytest tests/ -m "not integration and not e2e" -x -q
-```
-
-### What is NOT runnable yet (Phase 1)
-
-The following require Phase 2 (code extraction) to be complete:
-- `uvicorn main:app` — no `src/main.py` yet
-- Integration tests — no service source
-- Docker build producing a running container — Dockerfile source COPY commented out
-- Evaluation harness — no datasets or runners yet
-
-### After Phase 2 — full local dev
-
-```bash
 # Start service (requires Qdrant + Postgres)
 export QDRANT_URL=http://localhost:6333
 export POSTGRES_DSN=postgresql://user:pass@localhost:5432/agentopia
@@ -103,32 +82,22 @@ export K8S_NAMESPACE=agentopia
 cd src && uvicorn main:app --host 0.0.0.0 --port 8002 --reload
 
 # Fast gate (no external deps)
-pytest tests/ -m "not integration and not e2e" -x -q
+PYTHONPATH=src python -m pytest tests/ -m "not integration and not e2e" -x -q
 
 # Integration gate (requires Qdrant + Postgres)
-pytest tests/ -m "integration" -x -q
+PYTHONPATH=src python -m pytest tests/ -m "integration" -x -q
 ```
 
-Until Phase 2 is complete, run the service from:
-```bash
-cd agentopia-protocol/knowledge-api/src
-```
+> **Known local env limitation:** `python-multipart` is required by FastAPI for the file upload endpoint (`POST /{scope}/ingest`). Without it, `TestClient`-based API tests fail at import. Install with `pip install python-multipart` to run the full test suite. Service startup and all non-API-layer tests are unaffected.
 
 ---
 
 ## CI/CD Overview
 
-**Phase 1 (current):**
-- CI runs on push to `dev` in this repo: fast gate (`.github/workflows/ci.yml`)
-- Docker image is buildable via `workflow_dispatch` but **NOT pushed** — gated by atomic cutover (#24)
-- Production image is still built and pushed from `agentopia-protocol`
-
-**After Phase 3 cutover:**
+- CI runs on push to `dev` and `main`: fast gate (`.github/workflows/ci.yml`) + Docker build
 - CI pushes `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}` from this repo
-- ArgoCD Image Updater picks up new tags and deploys to `agentopia-dev`
-- `agentopia-protocol` no longer builds or pushes the knowledge-api image
-
-After extraction to this repo, CI will be set up here directly. See [docs/migration.md](docs/migration.md).
+- ArgoCD Image Updater picks up new `dev-{sha}` tags and deploys to `agentopia-dev`
+- `agentopia-protocol` no longer builds or pushes the knowledge-api image (retired 2026-04-09)
 
 ---
 
@@ -144,13 +113,25 @@ Runtime config is injected via K8s Secrets. See [docs/operations.md](docs/operat
 
 Retrieval quality is measured, not assumed. Every scope change and every retrieval pipeline change is evaluated against a labeled golden question set before promotion.
 
-Current production baseline (dense-only, `text-embedding-3-small`):
+Current production baseline (dense-only, `text-embedding-3-small`, 1536d):
 - nDCG@5 = 0.925
 - MRR = 0.96
 - P@5 = 0.84
 - R@5 = 1.0
 
-Any change to chunking, embedding model, or retrieval mode must demonstrate no regression against this baseline before enabling for existing scopes. See [docs/evaluation.md](docs/evaluation.md).
+### Retrieval feature roadmap
+
+| Item | Status |
+|---|---|
+| Dense-only search | Production baseline |
+| W1 — Markdown-aware chunking | **Accepted (opt-in)** — use `chunking_strategy: "markdown_aware"` in IngestConfig |
+| W1.5 — Section path context | **Accepted** — `section_path` field in Citation, populated for MARKDOWN_AWARE chunks |
+| W2 — BM25/hybrid retrieval | **Frozen** — conditional reopen only, no implementation |
+| W3a — Query expansion | **Not approved** — implemented, default-off, did not clear production gate |
+| W3b — HyDE | **Not approved** — implemented, default-off, did not clear production gate |
+| W4 — LLM listwise reranking | **Not approved** — implemented, default-off, actively regressed retrieval quality |
+
+See [docs/evaluation.md](docs/evaluation.md) for gate definitions and W-series evidence.
 
 ---
 

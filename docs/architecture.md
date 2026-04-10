@@ -18,6 +18,7 @@ It does not make workflow decisions, does not call LLMs for reasoning, and does 
 /api/v1/knowledge/{scope}/reindex               POST   — re-embed all docs in scope
 /api/v1/knowledge/{scope}/documents             GET    — list documents in scope
 /api/v1/knowledge/{scope}/documents/{source}    DELETE — remove specific document by source path
+/api/v1/knowledge/webhook                       POST   — RETIRED (returns 410). Use /{scope}/ingest.
 /internal/health                                GET    — internal health: Qdrant + binding cache + proxy config
 /internal/binding-sync                          POST   — webhook: bot-config-api pushes binding updates
 /internal/binding-sync/{bot_name}               GET    — query single bot binding state
@@ -75,7 +76,7 @@ A bot can only search scopes present in its binding. Scope access cannot be elev
 
 ## Retrieval Pipeline (Current Production Baseline)
 
-**Dense-only vector search.** Hybrid retrieval (BM25 + dense) is planned but not yet shipped.
+**Dense-only vector search.** Hybrid retrieval (BM25 + dense) is frozen — see W2 below.
 
 ### Ingest path
 
@@ -133,9 +134,9 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 **Behavior:** `section_path` is populated automatically for `MARKDOWN_AWARE` chunks. Empty for all other strategies (backward compatible). Additive field — no API contract change, no caller changes required.
 
-### Sparse index / hybrid retrieval (BM25 + dense)
+### Sparse index / hybrid retrieval (BM25 + dense) — W2 FROZEN
 
-BM25 sparse encoding alongside dense vectors. Score fusion via RRF. Issue tracked in `agentopia-protocol` as #319. Will require Qdrant sparse vector support and per-scope evaluation.
+BM25 sparse encoding alongside dense vectors. Score fusion via RRF. **Frozen — conditional reopen only** ([agentopia-super-rag#15](https://github.com/ai-agentopia/agentopia-super-rag/issues/15)). Reopen requires: Qdrant sparse vector support confirmed, dedicated evaluation evidence on a real production scope, and explicit CTO reopen. No code exists for this item. Default dense-only path is unchanged.
 
 ### Query expansion (W3a — implemented, evaluated, not approved)
 
