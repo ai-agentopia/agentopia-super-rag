@@ -541,6 +541,14 @@ class KnowledgeService:
         if _env_scopes:
             self._expansion_allowed_scopes = {s.strip() for s in _env_scopes.split(",") if s.strip()}
 
+        # W3b: per-scope HyDE allowlist. Only scopes in this set may use HyDE.
+        # Populated from HYDE_SCOPES env var (comma-separated) or via
+        # enable_hyde() method.
+        self._hyde_allowed_scopes: set[str] = set()
+        _env_hyde = os.getenv("HYDE_SCOPES", "")
+        if _env_hyde:
+            self._hyde_allowed_scopes = {s.strip() for s in _env_hyde.split(",") if s.strip()}
+
     def enable_query_expansion(self, scope: str) -> None:
         """Enable query expansion for a specific scope (W3a #16)."""
         self._expansion_allowed_scopes.add(scope)
@@ -554,6 +562,20 @@ class KnowledgeService:
     def is_expansion_allowed(self, scopes: list[str]) -> bool:
         """Check if query expansion is allowed for any of the given scopes."""
         return any(s in self._expansion_allowed_scopes for s in scopes)
+
+    def enable_hyde(self, scope: str) -> None:
+        """Enable HyDE for a specific scope (W3b #17)."""
+        self._hyde_allowed_scopes.add(scope)
+        logger.info("W3b: HyDE enabled for scope '%s'", scope)
+
+    def disable_hyde(self, scope: str) -> None:
+        """Disable HyDE for a specific scope (W3b #17)."""
+        self._hyde_allowed_scopes.discard(scope)
+        logger.info("W3b: HyDE disabled for scope '%s'", scope)
+
+    def is_hyde_allowed(self, scopes: list[str]) -> bool:
+        """Check if HyDE is allowed for any of the given scopes."""
+        return any(s in self._hyde_allowed_scopes for s in scopes)
 
     def ingest(
         self,
@@ -710,6 +732,7 @@ class KnowledgeService:
         min_score: float = 0.0,
         query_expansion_enabled: bool = False,
         query_expansion_n: int = 3,
+        hyde_enabled: bool = False,
     ) -> list[SearchResult]:
         """Search across knowledge scopes.
 
@@ -722,6 +745,14 @@ class KnowledgeService:
         2. Run retrieval for original + N expansions
         3. Merge results via RRF (Reciprocal Rank Fusion)
         4. On LLM failure, fall back silently to dense-only search
+
+        When hyde_enabled=True (W3b #17):
+        1. Generate one hypothetical answer via LLM
+        2. Retrieve using the hypothesis embedding
+        3. Merge HyDE results with original query results via RRF
+        4. On LLM failure, fall back silently to dense-only search
+        Per-scope allowlist enforced — hyde_enabled=True ignored for non-allowed scopes.
+        W3a and W3b are independent; enabling both is not supported without combined eval.
         """
         # Qdrant path: fan-out across scopes, merge, sort, limit
         if self._qdrant:
@@ -757,6 +788,37 @@ class KnowledgeService:
 
                 all_results.sort(key=lambda r: r.score, reverse=True)
                 final = all_results[:limit]
+                self._audit_search_results(final)
+                return final
+
+            if hyde_enabled:
+                # W3b: split scopes into allowed (HyDE) vs blocked (dense-only)
+                hyde_allowed = [s for s in scopes if s in self._hyde_allowed_scopes]
+                hyde_blocked = [s for s in scopes if s not in self._hyde_allowed_scopes]
+
+                hyde_results: list[SearchResult] = []
+
+                if hyde_allowed:
+                    hyde_results.extend(
+                        self._search_with_hyde(query, hyde_allowed, limit, min_score)
+                    )
+
+                for scope in hyde_blocked:
+                    try:
+                        hyde_results.extend(
+                            self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+                        )
+                    except Exception as exc:
+                        logger.warning("Qdrant search failed for scope '%s': %s", scope, exc)
+
+                if hyde_blocked:
+                    logger.info(
+                        "W3b: HyDE applied to %s, dense-only for %s",
+                        hyde_allowed, hyde_blocked,
+                    )
+
+                hyde_results.sort(key=lambda r: r.score, reverse=True)
+                final = hyde_results[:limit]
                 self._audit_search_results(final)
                 return final
 
@@ -890,6 +952,99 @@ class KnowledgeService:
         logger.info(
             "W3a: completed in %.0fms (expansion=%.0fms, retrieval=%.0fms, results=%d)",
             total_ms, expansion_ms, total_ms - expansion_ms, len(final),
+        )
+        self._audit_search_results(final)
+        return final
+
+    def _search_with_hyde(
+        self,
+        query: str,
+        scopes: list[str],
+        limit: int,
+        min_score: float,
+    ) -> list[SearchResult]:
+        """Search with HyDE (W3b #17).
+
+        1. Generate one hypothetical answer via LLM
+        2. Retrieve using the hypothesis embedding
+        3. Merge HyDE results with original query results via RRF
+        4. On LLM failure, fall back to dense-only search
+        """
+        from services.hyde import generate_hypothesis
+        from services.query_expansion import rrf_merge
+
+        t0 = time.monotonic()
+        hypothesis = generate_hypothesis(query)
+        hypothesis_ms = (time.monotonic() - t0) * 1000
+
+        def _retrieve(q: str) -> list[dict]:
+            results_for_q: list[dict] = []
+            for scope in scopes:
+                try:
+                    sr_list = self._qdrant.search_scope(q, scope, limit, min_score=min_score)
+                    for sr in sr_list:
+                        results_for_q.append({
+                            "text": sr.text,
+                            "score": sr.score,
+                            "scope": sr.scope,
+                            "citation": {
+                                "source": sr.citation.source,
+                                "section": sr.citation.section,
+                                "section_path": sr.citation.section_path,
+                                "page": sr.citation.page,
+                                "chunk_index": sr.citation.chunk_index,
+                                "ingested_at": sr.citation.ingested_at,
+                                "document_hash": sr.citation.document_hash,
+                            },
+                        })
+                except Exception as exc:
+                    logger.warning("W3b: search failed for scope '%s': %s", scope, exc)
+            return results_for_q
+
+        # Always include original query results
+        original_results = _retrieve(query)
+
+        if hypothesis:
+            # Merge: [original, HyDE] via RRF
+            hyde_results = _retrieve(hypothesis)
+            ranked_lists = [original_results, hyde_results]
+            logger.info(
+                "W3b: RRF merge — original=%d results, HyDE=%d results (%.0fms generation)",
+                len(original_results), len(hyde_results), hypothesis_ms,
+            )
+        else:
+            # Fallback: hypothesis generation failed, dense-only
+            ranked_lists = [original_results]
+            logger.info(
+                "W3b: falling back to dense-only (hypothesis generation failed, %.0fms)",
+                hypothesis_ms,
+            )
+
+        merged = rrf_merge(ranked_lists, limit)
+
+        final = []
+        for r in merged:
+            cit = r.get("citation", {})
+            final.append(SearchResult(
+                text=r.get("text", ""),
+                score=r.get("score", 0.0),
+                scope=r.get("scope", ""),
+                citation=Citation(
+                    source=cit.get("source", ""),
+                    section=cit.get("section", ""),
+                    section_path=cit.get("section_path", ""),
+                    page=cit.get("page"),
+                    chunk_index=cit.get("chunk_index", 0),
+                    score=r.get("score", 0.0),
+                    ingested_at=cit.get("ingested_at", 0.0),
+                    document_hash=cit.get("document_hash", ""),
+                ),
+            ))
+
+        total_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "W3b: completed in %.0fms (hypothesis=%.0fms, retrieval=%.0fms, results=%d)",
+            total_ms, hypothesis_ms, total_ms - hypothesis_ms, len(final),
         )
         self._audit_search_results(final)
         return final
@@ -1054,7 +1209,10 @@ class QdrantBackend:
         self._embedding_model = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-small")
         self._embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://openrouter.ai/api/v1/embeddings")
         self._embedding_timeout = int(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30"))
-        self._embedding_api_key = os.getenv("OPENROUTER_API_KEY", "")
+        self._embedding_api_key = (
+            os.getenv("EMBEDDING_API_KEY", "")
+            or os.getenv("OPENROUTER_API_KEY", "")
+        )
 
         # Hybrid retrieval config (#319, frozen)
         self._hybrid_enabled = os.getenv("HYBRID_SEARCH_ENABLED", "false").lower() == "true"
