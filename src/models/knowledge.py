@@ -52,7 +52,8 @@ class DocumentMetadata(BaseModel):
     source_type: SourceType = SourceType.BUSINESS_DOC  # Phase 0 foundation for Track C
     scope: str = ""  # Knowledge scope (Qdrant collection)
     page: int | None = None  # PDF page number
-    section: str = ""  # Section heading
+    section: str = ""  # Section heading (immediate)
+    section_path: str = ""  # Heading hierarchy path (W1.5): "H1 > H2 > H3"
     language: str = ""  # Code language (for code files)
     chunk_index: int = 0  # Position within document
     total_chunks: int = 0
@@ -104,6 +105,7 @@ class Citation(BaseModel):
 
     source: str
     section: str = ""
+    section_path: str = ""  # Heading hierarchy path (W1.5): "H1 > H2 > H3"
     page: int | None = None
     chunk_index: int = 0
     score: float = 0.0

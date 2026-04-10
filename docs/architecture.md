@@ -125,7 +125,13 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 **Status:** Implemented. Opt-in only — must be explicitly requested via `chunking_strategy: "markdown_aware"` in IngestConfig. Default remains `fixed_size`.
 
-**Evaluation:** Regression check passed (zero regression on seed dataset). Synthetic markdown benchmark shows strong improvement (nDCG@5 +0.4095). Real pilot-scope promotion gate has not been executed — W1 is not promoted for production use. See `docs/evaluation.md` for details and remaining gate steps.
+**Evaluation:** Real pilot gate PASSED on `joblogic-kb/api-docs` (nDCG@5 +0.0477). See `docs/evaluation.md` for full results.
+
+### Context/path-aware retrieval (W1.5 — shipped)
+
+`section_path` field added to `DocumentMetadata` and `Citation`. When using `MARKDOWN_AWARE` chunking, each chunk carries its full heading hierarchy path (e.g., `"API Reference > Authentication > Token Management"`). This gives downstream consumers document-tree context for disambiguation — two chunks titled "Phase 1" from different parent sections are now distinguishable.
+
+**Behavior:** `section_path` is populated automatically for `MARKDOWN_AWARE` chunks. Empty for all other strategies (backward compatible). Additive field — no API contract change, no caller changes required.
 
 ### Sparse index / hybrid retrieval (BM25 + dense)
 
