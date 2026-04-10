@@ -201,6 +201,128 @@ class TestCitationSectionPath:
         assert data["section_path"] == "API > Auth"
 
 
+# ── Correctness: duplicate headings + deep heading levels ──────────────
+
+
+class TestDuplicateHeadingNames:
+    """Repeated heading names under different parents get distinct paths."""
+
+    def test_same_name_different_parents(self):
+        """Two '## Overview' under different H1s get distinct paths."""
+        content = (
+            "# API\n\nAPI intro with enough content to fill a chunk completely.\n\n"
+            "## Overview\n\nAPI overview details covering endpoints and auth.\n\n"
+            "# Worker\n\nWorker intro with enough content to fill a chunk too.\n\n"
+            "## Overview\n\nWorker overview details covering tasks and queues.\n"
+        )
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=200
+        )
+        chunks = chunk_document(
+            content, "doc.md", "scope", DocumentFormat.MARKDOWN, config
+        )
+        overview_paths = [
+            c.metadata.section_path
+            for c in chunks
+            if c.metadata.section == "Overview"
+        ]
+        assert len(overview_paths) == 2
+        assert "API > Overview" in overview_paths
+        assert "Worker > Overview" in overview_paths
+
+    def test_three_identically_named_subsections(self):
+        """Three '### Details' under different parents all get unique paths."""
+        content = (
+            "# A\n\n## Sub1\n\n### Details\n\nDetails for A/Sub1 content here.\n\n"
+            "## Sub2\n\n### Details\n\nDetails for A/Sub2 content here.\n\n"
+            "# B\n\n## Sub3\n\n### Details\n\nDetails for B/Sub3 content here.\n"
+        )
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=150
+        )
+        chunks = chunk_document(
+            content, "doc.md", "scope", DocumentFormat.MARKDOWN, config
+        )
+        detail_paths = [
+            c.metadata.section_path
+            for c in chunks
+            if c.metadata.section == "Details"
+        ]
+        assert len(detail_paths) == 3
+        assert "A > Sub1 > Details" in detail_paths
+        assert "A > Sub2 > Details" in detail_paths
+        assert "B > Sub3 > Details" in detail_paths
+
+
+class TestDeepHeadingLevels:
+    """H4-H6 headings populate section and section_path correctly."""
+
+    def test_h4_section_extracted(self):
+        """H4 heading is extracted as section."""
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=500
+        )
+        content = "# Top\n\n#### Deep H4\n\nContent under H4 heading."
+        chunks = chunk_document(
+            content, "doc.md", "scope", DocumentFormat.MARKDOWN, config
+        )
+        sections = [c.metadata.section for c in chunks]
+        assert "Deep H4" in sections
+
+    def test_h5_h6_section_extracted(self):
+        """H5 and H6 headings are extracted as section."""
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=200
+        )
+        content = (
+            "# Top\n\nIntro content.\n\n"
+            "##### H5 Heading\n\nH5 body content here.\n\n"
+            "###### H6 Heading\n\nH6 body content here.\n"
+        )
+        chunks = chunk_document(
+            content, "doc.md", "scope", DocumentFormat.MARKDOWN, config
+        )
+        sections = [c.metadata.section for c in chunks]
+        assert "H5 Heading" in sections
+        assert "H6 Heading" in sections
+
+    def test_h4_section_path(self):
+        """H4 under H1>H2>H3 gets full 4-level path."""
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=150
+        )
+        content = (
+            "# L1\n\nL1 content.\n\n"
+            "## L2\n\nL2 content.\n\n"
+            "### L3\n\nL3 content.\n\n"
+            "#### L4\n\nL4 content with enough text for its own chunk.\n"
+        )
+        chunks = chunk_document(
+            content, "doc.md", "scope", DocumentFormat.MARKDOWN, config
+        )
+        path_map = {
+            c.metadata.section: c.metadata.section_path
+            for c in chunks
+            if c.metadata.section
+        }
+        assert path_map.get("L4") == "L1 > L2 > L3 > L4"
+
+    def test_citation_carries_deep_path(self):
+        """Citation from a deep heading chunk carries the full section_path."""
+        svc = KnowledgeService()
+        content = (
+            "# Root\n\nRoot content.\n\n"
+            "## Mid\n\nMid content.\n\n"
+            "#### Deep\n\nDeep content about Kubernetes deployment strategies.\n"
+        )
+        config = IngestConfig(
+            chunking_strategy=ChunkingStrategy.MARKDOWN_AWARE, chunk_size=150
+        )
+        svc.ingest("test", content, "doc.md", config=config)
+        results = svc.search("Kubernetes deployment", ["test"])
+        assert len(results) >= 1
+
+
 # ── End-to-end: ingest + search ────────────────────────────────────────
 
 

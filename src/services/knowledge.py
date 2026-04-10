@@ -65,10 +65,8 @@ def chunk_document(
 
     Returns list of DocumentChunks ready for embedding.
     """
-    section_paths = None
     if config.chunking_strategy == ChunkingStrategy.MARKDOWN_AWARE:
         texts = _chunk_markdown_aware(content, config.chunk_size)
-        section_paths = _build_section_paths(content)
     elif config.chunking_strategy == ChunkingStrategy.PARAGRAPH:
         texts = _chunk_by_paragraph(content, config.chunk_size)
     elif config.chunking_strategy == ChunkingStrategy.CODE_AWARE:
@@ -76,14 +74,26 @@ def chunk_document(
     else:
         texts = _chunk_fixed_size(content, config.chunk_size, config.chunk_overlap)
 
+    # For markdown-aware chunks, compute section_path per-chunk using a
+    # heading stack. This avoids the duplicate-heading-name collision that
+    # a global dict[heading_text -> path] would have.
+    use_section_paths = config.chunking_strategy == ChunkingStrategy.MARKDOWN_AWARE
+    heading_stack: list[tuple[int, str]] = []  # (level, heading_text)
+
     chunks = []
     for i, text in enumerate(texts):
         if not text.strip():
             continue
         section = _extract_section(text)
         section_path = ""
-        if section_paths and section:
-            section_path = section_paths.get(section, section)
+        if use_section_paths and section:
+            # Find heading level from the chunk text
+            level = _extract_heading_level(text)
+            if level > 0:
+                while heading_stack and heading_stack[-1][0] >= level:
+                    heading_stack.pop()
+                heading_stack.append((level, section))
+                section_path = " > ".join(h for _, h in heading_stack)
         chunks.append(
             DocumentChunk(
                 text=text,
@@ -417,11 +427,19 @@ def _build_section_paths(content: str) -> dict[str, str]:
 
 
 def _extract_section(text: str) -> str:
-    """Extract section heading from chunk text."""
+    """Extract section heading from chunk text (H1-H6)."""
     import re
 
-    match = re.search(r"^#{1,3}\s+(.+)$", text, re.MULTILINE)
+    match = re.search(r"^#{1,6}\s+(.+)$", text, re.MULTILINE)
     return match.group(1).strip() if match else ""
+
+
+def _extract_heading_level(text: str) -> int:
+    """Extract heading level (1-6) from the first heading in chunk text. 0 if none."""
+    import re
+
+    match = re.search(r"^(#{1,6})\s+", text, re.MULTILINE)
+    return len(match.group(1)) if match else 0
 
 
 def build_citations(results: list[dict[str, Any]]) -> list[SearchResult]:
