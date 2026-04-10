@@ -137,9 +137,15 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 BM25 sparse encoding alongside dense vectors. Score fusion via RRF. Issue tracked in `agentopia-protocol` as #319. Will require Qdrant sparse vector support and per-scope evaluation.
 
-### Query expansion
+### Query expansion (W3a — shipped, opt-in)
 
-LLM-generated alternative phrasings before vector search. Each phrasing is embedded independently; results are merged via RRF. Adds one llm-proxy round-trip per query (estimated +300–800ms latency). Requires latency budget approval and per-scope evaluation before enabling.
+`query_expansion=true` search parameter generates 3 alternative phrasings via LLM, runs retrieval for original + 3 expansions, and merges results via RRF (Reciprocal Rank Fusion). Disabled by default on all scopes.
+
+**Cost/latency:** 1 LLM call (~300-800ms) + 3 extra retrieval queries + 3 extra embedding calls per search. Estimated +300-1000ms total. Requires CTO latency budget approval before any production scope enablement.
+
+**Evaluation:** Simulated-expansion comparison on `joblogic-kb/api-docs` (10 queries): nDCG@5 0.7917 → 0.8568 (+0.0652). Live LLM evaluation pending latency budget approval. See `evaluation/results/w3a_expansion_comparison.json`.
+
+**Rollout:** Per-scope opt-in only via `query_expansion=true` search parameter. Circuit breaker: if LLM call fails, falls back silently to dense-only search.
 
 ### HyDE (Hypothetical Document Embedding)
 

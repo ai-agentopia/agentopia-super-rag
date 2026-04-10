@@ -1,0 +1,14 @@
+{
+  "evaluation": "w3a_expansion_comparison",
+  "timestamp": "2026-04-10T01:49:28Z",
+  "scope": "joblogic-kb/api-docs",
+  "expansion_type": "simulated (manual phrasings)",
+  "queries": 10,
+  "baseline_ndcg_mean": 0.7917,
+  "expanded_ndcg_mean": 0.8568,
+  "ndcg_delta": 0.0652,
+  "baseline_mrr_mean": 0.7667,
+  "expanded_mrr_mean": 0.825,
+  "cost_note": "1 LLM call + 3x embedding per query when enabled",
+  "latency_note": "Estimated +300-1000ms per query (LLM + 3 extra retrievals)"
+}

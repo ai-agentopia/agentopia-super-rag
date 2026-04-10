@@ -113,6 +113,7 @@ async def search_knowledge(
     query: str = Query(..., min_length=1),
     scopes: list[str] = Query(default=[]),
     limit: int = Query(default=5, ge=1, le=50),
+    query_expansion: bool = Query(default=False, description="Enable W3a query expansion (per-scope opt-in)"),
     auth_ctx=Depends(require_knowledge_read),
 ) -> dict[str, Any]:
     """Search knowledge. Bot: server-side scope resolution via BindingCache."""
@@ -122,8 +123,8 @@ async def search_knowledge(
     if auth_type == "bot":
         effective_scopes = _resolve_bot_scopes(identity)
         logger.info(
-            "knowledge_search: bot=%s resolved_scopes=%s query_len=%d",
-            identity, effective_scopes, len(query),
+            "knowledge_search: bot=%s resolved_scopes=%s query_len=%d expansion=%s",
+            identity, effective_scopes, len(query), query_expansion,
         )
     else:
         effective_scopes = scopes if scopes else [s.name for s in svc.list_scopes()]
@@ -131,7 +132,12 @@ async def search_knowledge(
     if not effective_scopes:
         return {"results": [], "count": 0}
 
-    results = svc.search(query=query, scopes=effective_scopes, limit=limit)
+    results = svc.search(
+        query=query,
+        scopes=effective_scopes,
+        limit=limit,
+        query_expansion_enabled=query_expansion,
+    )
     return {"results": [r.model_dump() for r in results], "count": len(results)}
 
 
