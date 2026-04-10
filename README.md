@@ -1,20 +1,141 @@
 # agentopia-super-rag
 
-Governed, multi-tenant retrieval service for the Agentopia platform.
+Super RAG is a governed retrieval system for production knowledge access.
 
-This is the production source for the knowledge-api service. Extraction from `agentopia-protocol` is complete. See [docs/migration.md](docs/migration.md) for the historical record.
+This repository is the production source for the `knowledge-api` service currently deployed in Agentopia, but the system design is broader than Agentopia itself: scoped retrieval, document lifecycle control, reproducible evaluation, and safe rollout of retrieval changes.
+
+Extraction from `agentopia-protocol` is complete. See [docs/migration.md](docs/migration.md) for the historical record.
 
 ---
 
-## Repo Purpose
+## What Super RAG Is
 
-`agentopia-super-rag` provides scoped, governed knowledge retrieval for Agentopia bots. Each bot has a bounded set of knowledge scopes it can query. The service enforces scope isolation at the API level — a bot cannot retrieve content outside its subscribed scopes regardless of query content.
+Super RAG is not "RAG with more prompts." It is a retrieval system with platform-grade constraints:
 
-This is not a general-purpose RAG library. It is a platform service designed for:
-- multi-tenant, per-bot knowledge isolation
-- operator-curated corpora (not open-ended crawling)
-- governed ingest lifecycle with document versioning
-- reproducible retrieval quality evaluation
+- governed scope isolation
+- operator-curated corpora
+- explicit document lifecycle and provenance
+- measured retrieval quality gates
+- rollout discipline for retrieval changes
+
+In practical terms, Super RAG answers this question:
+
+> How do you let many runtime agents retrieve from many knowledge domains without turning retrieval into an ungoverned blob of vectors, prompt hacks, and silent regressions?
+
+The answer in this repo is:
+
+- one retrieval service
+- one scoped auth model
+- one document lifecycle model
+- one evaluation framework
+- explicit opt-in gates for every non-baseline retrieval enhancement
+
+This repo is one implementation of that model. Today it runs inside Agentopia. The underlying system pattern is reusable anywhere you need governed retrieval rather than ad hoc app-local RAG.
+
+---
+
+## Why It Exists
+
+Traditional RAG implementations usually optimize for one application at a time:
+
+- ingest some documents
+- embed them
+- search top-k
+- hand results to the LLM
+
+That is fine for prototypes. It is weak for multi-tenant systems, multi-bot systems, or any environment where retrieval behavior becomes a platform dependency.
+
+Super RAG exists because production retrieval usually needs stricter guarantees:
+
+- one bot or tenant must not retrieve another bot's corpus
+- document replacements must be traceable and atomic
+- retrieval changes must be benchmarked before rollout
+- experimental techniques must stay dormant until they prove ROI
+- operators need health, provenance, and reindex controls
+
+---
+
+## Super RAG vs Traditional RAG vs WikiRAG-Style Systems
+
+The useful comparison is not "which one is smarter." It is "what problem is each one solving."
+
+| Dimension | Traditional RAG | WikiRAG-style systems | Super RAG |
+|---|---|---|---|
+| Primary goal | Add retrieval to one app quickly | Improve retrieval on structured docs / wiki-like corpora | Run retrieval as a governed system |
+| Corpus model | Usually one app corpus, loosely managed | Documentation-heavy, markdown/wiki-first corpora | Multiple scopes / domains with explicit isolation |
+| Access control | Often application-level, coarse | Usually secondary concern | First-class: scope isolation enforced in the retrieval layer |
+| Document lifecycle | Often overwrite-and-forget | Usually optimized for chunk quality, less for lifecycle | Active / superseded / deleted record model with provenance |
+| Retrieval experiments | Frequently enabled ad hoc | Strong focus: chunking, path context, query variants, rerank, HyDE | Allowed, but gated behind evaluation and rollout controls |
+| Evaluation discipline | Often sparse or app-local | Usually benchmark-driven on retrieval quality | Required for promotion; regressions block rollout |
+| Best fit | Small product feature or prototype | Knowledge-heavy docs search | Multi-tenant / multi-bot / platform retrieval |
+
+### Traditional RAG
+
+Traditional RAG is the baseline pattern:
+
+1. chunk documents
+2. embed documents
+3. retrieve top-k
+4. send chunks to the LLM
+
+It is simple and fast to build. It is also where people usually accumulate:
+
+- unclear access boundaries
+- no document provenance
+- no controlled rollout for retrieval changes
+- no reproducible benchmark history
+
+Traditional RAG is a good starting point. Super RAG is what you build when retrieval becomes infrastructure.
+
+### WikiRAG-style systems
+
+WikiRAG-style systems are strong where the corpus is highly structured:
+
+- markdown docs
+- wiki pages
+- section-heavy technical documentation
+- path / heading context
+
+This repo deliberately borrowed that family of ideas for evaluation:
+
+- markdown-aware chunking
+- section-path context
+- query expansion
+- HyDE
+- reranking
+
+But Super RAG is not "WikiRAG runtime pasted into production." It is a stricter system:
+
+- WikiRAG-style techniques are inputs into the experimentation roadmap
+- only techniques that clear evaluation gates become acceptable runtime options
+- failed techniques remain implemented but dormant/default-off
+
+So the relationship is:
+
+- traditional RAG = generic baseline pattern
+- WikiRAG-style = technique family for docs-heavy retrieval
+- Super RAG = governed retrieval system that can selectively absorb those techniques when they prove value
+
+---
+
+## What This Repository Owns
+
+This repository owns the retrieval plane:
+
+- knowledge ingest, parsing, chunking, embedding, indexing
+- scoped semantic search
+- document lifecycle management
+- bot-scope binding cache
+- per-scope auth enforcement
+- retrieval quality evaluation
+
+It does **not** own:
+
+- workflow orchestration
+- bot identity and deployment
+- UI / operator console
+- general LLM routing beyond what retrieval requires
+- planner / reasoning logic
 
 ---
 
@@ -31,21 +152,159 @@ agentopia-super-rag  ◄──── bot gateway (bearer token, per-bot K8s Secr
     └── OpenRouter      (embedding API: text-embedding-3-small, 1536d)
 ```
 
-**Owns:**
-- Knowledge ingest, chunking, embedding, and indexing
-- Scoped semantic search (dense vector, production baseline)
-- Document lifecycle management (two-phase atomic replace)
-- Bot-scope binding lifecycle (K8s ArgoCD CRD annotation read)
-- Per-scope auth enforcement (internal token + bot bearer)
-- Retrieval quality evaluation framework
+Current deployment context:
 
-**Does not own:**
-- Workflow orchestration (Temporal, `agentopia-protocol`)
-- Bot identity and deployment (bot-config-api, `agentopia-protocol`)
-- LLM routing and provider failover (`agentopia-llm-proxy`)
-- Reasoning plane / planner graph (`agentopia-graph-executor`)
-- UI / operator console (`agentopia-ui`)
-- Infrastructure and deployment manifests (`agentopia-infra`)
+- this repo runs as `knowledge-api` inside Agentopia
+- `agentopia-protocol` uses it for operator proxying and bot runtime retrieval
+- `agentopia-infra` deploys it
+
+That deployment context is current reality. It is not the whole definition of Super RAG.
+
+---
+
+## Core Properties
+
+### 1. Scoped retrieval
+
+Every query executes inside explicitly allowed scopes. A caller cannot expand scope by changing query wording.
+
+### 2. Governed ingest lifecycle
+
+Documents are not just "present" or "missing." They move through a lifecycle:
+
+- active
+- superseded
+- deleted
+
+That gives operators provenance, atomic replace semantics, and a real source of truth across restarts.
+
+### 3. Reproducible retrieval evaluation
+
+Retrieval changes are evaluated against labeled question sets. A technique does not become production-worthy because it sounds good in theory.
+
+### 4. Experimental features stay default-off
+
+This repo keeps unsuccessful retrieval techniques dormant rather than pretending they worked:
+
+- W3a query expansion: implemented, evaluated, not approved
+- W3b HyDE: implemented, evaluated, not approved
+- W4 reranking: implemented, evaluated, not approved
+
+That is a feature, not a failure. It keeps the runtime honest.
+
+---
+
+## Current System Status
+
+### Accepted
+
+- Dense-only vector retrieval: current production baseline
+- W1 markdown-aware chunking: accepted as opt-in for documentation-heavy scopes
+- W1.5 section/path-aware retrieval context: accepted
+
+### Implemented but not approved
+
+- W3a query expansion
+- W3b HyDE
+- W4 listwise reranking
+
+### Frozen
+
+- W2 hybrid sparse+dense retrieval
+
+See [docs/evaluation.md](docs/evaluation.md) for the evidence behind each decision.
+
+---
+
+## Benchmark and Evaluation Summary
+
+Retrieval quality in this repo is measured against labeled golden question sets. That is the core difference between "interesting retrieval code" and a real retrieval system.
+
+### Current production baseline
+
+Dense-only retrieval, `text-embedding-3-small`, top-5 results:
+
+| Metric | Value |
+|---|---|
+| nDCG@5 | 0.925 |
+| MRR | 0.96 |
+| P@5 | 0.84 |
+| R@5 | 1.0 |
+
+### Accepted retrieval improvement
+
+#### W1 markdown-aware chunking
+
+Real pilot gate on `joblogic-kb/api-docs`:
+
+| Metric | Fixed size | Markdown aware | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.7440 | 0.7917 | +0.0477 |
+| MRR | 0.7500 | 0.7667 | +0.0167 |
+| P@5 | 0.4200 | 0.4400 | +0.0200 |
+
+Outcome:
+
+- passed the real pilot gate
+- safe for opt-in on documentation-heavy scopes
+- default remains `fixed_size`
+
+### Evaluated and rejected retrieval improvements
+
+#### W3a query expansion
+
+Live evaluation did not clear the gate:
+
+| Model | nDCG@5 delta vs baseline | Result |
+|---|---|---|
+| `openai/gpt-4o-mini` | -0.0050 | fail |
+| `openai/gpt-4.1-mini` | +0.0050 | fail |
+
+Interpretation:
+
+- paraphrase-style expansion did not add enough retrieval signal on the real pilot corpus
+- cost/latency overhead was not justified by the gain
+
+#### W3b HyDE
+
+| Metric | Baseline | HyDE | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.9201 | 0.9175 | -0.0026 |
+| MRR | 0.9000 | 0.9000 | +0.0000 |
+| Avg latency | 577ms | 3313ms | +2736ms |
+
+Interpretation:
+
+- HyDE increased latency materially
+- retrieval quality did not improve
+
+#### W4 listwise reranking
+
+| Metric | Baseline | Reranked | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.5262 | 0.4024 | -0.1238 |
+| MRR | 0.5000 | 0.3333 | -0.1667 |
+| Avg rerank latency | — | 908ms | — |
+
+Interpretation:
+
+- generic LLM reranking actively hurt domain-specific ranking quality on the evaluated corpus
+
+### Benchmark philosophy
+
+This repo treats benchmarks as promotion gates, not marketing numbers.
+
+The rule is:
+
+- if a retrieval change helps, it can become opt-in
+- if it fails the gate, it stays dormant/default-off
+- if it is frozen, it is not quietly revived without new evidence
+
+Full evidence, scripts, and artifacts:
+
+- [docs/evaluation.md](docs/evaluation.md)
+- `evaluation/`
+- `evaluation/results/`
 
 ---
 
@@ -55,9 +314,9 @@ agentopia-super-rag  ◄──── bot gateway (bearer token, per-bot K8s Secr
 |---|---|---|
 | Qdrant | Vector storage and ANN search | Yes |
 | PostgreSQL | Document lifecycle store | Yes |
-| Redis | (future) Caching layer | No (not yet used) |
+| Redis | Future caching layer | No |
 | OpenRouter | Embedding API (`text-embedding-3-small`) | Yes |
-| K8s API | Bot-scope binding cache (reads ArgoCD CRD annotations) | Yes (production) |
+| K8s API | Bot-scope binding cache in production | Yes (production) |
 
 K8s API access uses in-cluster service account. In local dev, binding cache falls back gracefully when K8s is unreachable.
 
@@ -67,10 +326,9 @@ K8s API access uses in-cluster service account. In local dev, binding cache fall
 
 ### Prerequisites
 
-- Python ≥ 3.12
-- Docker or Podman (for container workflows)
-- Qdrant and Postgres (for full ingest + search — see [Local Dependencies](#local-dependencies) below)
-- OpenRouter API key (for embedding — `text-embedding-3-small` via OpenRouter)
+- Python >= 3.12
+- Docker or Podman
+- OpenRouter API key for embedding
 
 ### Quick start — full stack via compose
 
@@ -78,38 +336,29 @@ The fastest way to run the complete service locally. `compose.yaml` starts Qdran
 
 ```bash
 cp .env.example .env.local
-# Set EMBEDDING_API_KEY (OpenRouter key) and optionally KNOWLEDGE_API_INTERNAL_TOKEN
-```
+# Set EMBEDDING_API_KEY and optionally KNOWLEDGE_API_INTERNAL_TOKEN
 
-```bash
-# Start all three services (builds knowledge-api from source)
 podman compose --env-file .env.local up --build
-
-# Docker also works
-docker compose --env-file .env.local up --build
+# or: docker compose --env-file .env.local up --build
 ```
 
-Smoke checks once started:
+Smoke checks:
+
 ```bash
 curl http://localhost:8002/health
-# → {"status":"ok","service":"knowledge-api","version":"1.0.0"}
 
-curl -H "X-Internal-Token: local-dev-token" http://localhost:8002/internal/health
-# → {"status":"ok","qdrant":"ok",...}  — confirms real Qdrant + Postgres backends
+curl -H "X-Internal-Token: local-dev-token" \
+  http://localhost:8002/internal/health
 ```
 
 Stop and reset:
-```bash
-# Stop, keep data
-podman compose --env-file .env.local down
 
-# Stop and delete volumes (full reset)
+```bash
+podman compose --env-file .env.local down
 podman compose --env-file .env.local down -v
 ```
 
-Use the manual paths below if you need explicit control over individual services or want to run the app natively without containers.
-
----
+Use the manual paths below if you need explicit control over each dependency.
 
 ### 1. Native Python
 
@@ -117,46 +366,28 @@ Use the manual paths below if you need explicit control over individual services
 git clone git@github.com:ai-agentopia/agentopia-super-rag.git
 cd agentopia-super-rag
 
-# Create venv and install all dependencies (includes python-multipart, psycopg, etc.)
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# Set up env vars
 cp .env.example .env.local
-# edit .env.local with your OpenRouter key, token, and local service URLs
 set -a && source .env.local && set +a
 
-# Run the service
 cd src && uvicorn main:app --host 0.0.0.0 --port 8002 --reload
 ```
 
-Smoke check:
-```bash
-curl http://localhost:8002/health
-# → {"status":"ok","service":"knowledge-api","version":"1.0.0"}
-```
-
-Without Qdrant/Postgres configured, the service starts in in-memory fallback mode (no persistent search or document lifecycle — useful for feature development only).
+Without `QDRANT_URL` / `DATABASE_URL`, the service runs in an in-memory fallback mode useful for feature work, not for full retrieval validation.
 
 ### 2. Test gate
 
 ```bash
-# Fast gate — no external dependencies required (runs from repo root)
 python -m pytest tests/ -m "not integration and not e2e" -x -q
-# → 421 passed, 23 skipped (validated)
 ```
 
-The `integration` and `e2e` markers are defined for future use. No tests are currently marked with them — the fast gate is the complete test gate.
-
-### 3. Local Dependencies
-
-Start Qdrant and Postgres locally with Podman (or Docker, substituting `podman` → `docker`):
+### 3. Manual local dependencies
 
 ```bash
-# Qdrant vector store
 podman run -d --name qdrant -p 6333:6333 qdrant/qdrant:latest
 
-# Postgres document store
 podman run -d --name agentopia-pg \
   -e POSTGRES_DB=agentopia \
   -e POSTGRES_USER=agentopia \
@@ -164,126 +395,35 @@ podman run -d --name agentopia-pg \
   -p 5432:5432 \
   postgres:16
 
-# Apply schema migrations (wait ~5s for Postgres to initialize)
 sleep 5
 PGPASSWORD=agentopia psql -h localhost -U agentopia -d agentopia \
   -f db/022_document_records.sql \
   -f db/023_source_type.sql
 ```
 
-### 4. Container paths
-
-**Build:**
+### 4. Container build
 
 ```bash
-# Docker
 docker build -t agentopia-super-rag:local .
-
-# Podman
 podman build -t agentopia-super-rag:local .
-```
-
-**Podman smoke run (in-memory mode — no Qdrant/Postgres needed):**
-
-```bash
-podman run --rm -p 8002:8002 \
-  -e KNOWLEDGE_API_INTERNAL_TOKEN=local-test \
-  agentopia-super-rag:local
-
-curl http://localhost:8002/health
-# → {"status":"ok","service":"knowledge-api","version":"1.0.0"}
-```
-
-**Podman full stack (all three services in a shared pod):**
-
-```bash
-podman pod create --name agentopia-local -p 8002:8002 -p 6333:6333 -p 5432:5432
-
-podman run -d --pod agentopia-local --name qdrant qdrant/qdrant:latest
-
-podman run -d --pod agentopia-local --name agentopia-pg \
-  -e POSTGRES_DB=agentopia \
-  -e POSTGRES_USER=agentopia \
-  -e POSTGRES_PASSWORD=agentopia \
-  postgres:16
-
-sleep 5
-PGPASSWORD=agentopia psql -h localhost -U agentopia -d agentopia \
-  -f db/022_document_records.sql \
-  -f db/023_source_type.sql
-
-podman run -d --pod agentopia-local --name agentopia-rag \
-  --env-file .env.local \
-  agentopia-super-rag:local
-```
-
-Within a pod all containers share the same network namespace, so `QDRANT_URL=http://localhost:6333` and `DATABASE_URL=postgresql://...@localhost:5432/agentopia` work correctly on both Linux and macOS.
-
-Smoke checks after startup:
-```bash
-curl http://localhost:8002/health
-# → {"status":"ok","service":"knowledge-api","version":"1.0.0"}
-
-curl -H "X-Internal-Token: local-dev-token" http://localhost:8002/internal/health
-# → {"status":"ok","qdrant":"ok",...}
-
-curl -H "X-Internal-Token: local-dev-token" http://localhost:8002/api/v1/knowledge/scopes
-# → {"scopes":[],"count":0}
 ```
 
 ---
 
 ## CI/CD Overview
 
-- **Main-only repo.** CI triggers on push to `main` only (`.github/workflows/ci.yml`, `.github/workflows/build-image.yml`). No `dev` or `uat` branches.
-- Push to `main` → fast gate → Docker build → push `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}` (tag format is `dev-{sha}`, not a branch name)
-- ArgoCD Image Updater picks up new `dev-{sha}` tags and deploys to `agentopia-dev` namespace
-- `agentopia-protocol` no longer builds or pushes the knowledge-api image (retired 2026-04-09)
+- Main-only repo: no `dev` or `uat` branches
+- Push to `main` -> Fast Gate -> Build Image -> publish `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}`
+- ArgoCD Image Updater tracks `dev-{sha}` and deploys to the non-prod Agentopia environment
 
 ---
 
-## Deploy Overview
+## Deployment
 
-Deployed via `agentopia-infra` Helm chart (`agentopia-base`), ArgoCD-managed. Service runs in `agentopia-dev` and `agentopia-uat` namespaces.
+This repo is currently deployed via `agentopia-infra` Helm configuration and runs in Agentopia non-prod environments.
 
-Runtime config is injected via K8s Secrets. See [docs/operations.md](docs/operations.md) for env var reference and health check endpoints.
+Runtime config and health endpoints:
 
----
-
-## Evaluation Philosophy
-
-Retrieval quality is measured, not assumed. Every scope change and every retrieval pipeline change is evaluated against a labeled golden question set before promotion.
-
-Current production baseline (dense-only, `text-embedding-3-small`, 1536d):
-- nDCG@5 = 0.925
-- MRR = 0.96
-- P@5 = 0.84
-- R@5 = 1.0
-
-### Retrieval feature roadmap
-
-| Item | Status |
-|---|---|
-| Dense-only search | Production baseline |
-| W1 — Markdown-aware chunking | **Accepted (opt-in)** — use `chunking_strategy: "markdown_aware"` in IngestConfig |
-| W1.5 — Section path context | **Accepted** — `section_path` field in Citation, populated for MARKDOWN_AWARE chunks |
-| W2 — BM25/hybrid retrieval | **Frozen** — conditional reopen only, no implementation |
-| W3a — Query expansion | **Not approved** — implemented, default-off, did not clear production gate |
-| W3b — HyDE | **Not approved** — implemented, default-off, did not clear production gate |
-| W4 — LLM listwise reranking | **Not approved** — implemented, default-off, actively regressed retrieval quality |
-
-See [docs/evaluation.md](docs/evaluation.md) for gate definitions and W-series evidence.
-
----
-
-## Link Map
-
-| Topic | File |
-|---|---|
-| Service boundary and interactions | [docs/architecture.md](docs/architecture.md) |
-| Extraction from monorepo | [docs/migration.md](docs/migration.md) |
-| Retrieval quality evaluation | [docs/evaluation.md](docs/evaluation.md) |
-| Runtime config and operations | [docs/operations.md](docs/operations.md) |
-| E2E integration testing | [docs/e2e.md](docs/e2e.md) |
-| Wiki-RAG evolution plan | [docs/architecture.md#planned-evolution](docs/architecture.md#planned-evolution) |
-| Public architecture docs | [ai-agentopia/docs/architecture/super-rag-blueprint.md](https://github.com/ai-agentopia/docs/blob/main/architecture/super-rag-blueprint.md) |
+- [docs/operations.md](docs/operations.md)
+- [docs/architecture.md](docs/architecture.md)
+- [docs/evaluation.md](docs/evaluation.md)
