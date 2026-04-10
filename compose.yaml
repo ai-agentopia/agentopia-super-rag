@@ -1,0 +1,72 @@
+# agentopia-super-rag — local full-stack
+#
+# Runs: Qdrant + Postgres + knowledge-api (built from source)
+#
+# Usage:
+#   cp .env.example .env.local
+#   # edit .env.local — set EMBEDDING_API_KEY and KNOWLEDGE_API_INTERNAL_TOKEN
+#   podman compose --env-file .env.local up --build
+#
+# Smoke check after startup:
+#   curl http://localhost:8002/health
+#   curl -H "X-Internal-Token: <your-token>" http://localhost:8002/internal/health
+
+services:
+
+  qdrant:
+    image: docker.io/qdrant/qdrant:latest
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant-data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/6333'"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  postgres:
+    image: docker.io/postgres:16
+    environment:
+      POSTGRES_DB: agentopia
+      POSTGRES_USER: agentopia
+      POSTGRES_PASSWORD: agentopia
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./db:/docker-entrypoint-initdb.d   # runs 022_*.sql then 023_*.sql on first start
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agentopia -d agentopia"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  knowledge-api:
+    build: .
+    ports:
+      - "8002:8002"
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      DATABASE_URL: postgresql://agentopia:agentopia@postgres:5432/agentopia
+      EMBEDDING_BASE_URL: https://openrouter.ai/api/v1/embeddings
+      EMBEDDING_API_KEY: ${EMBEDDING_API_KEY}
+      KNOWLEDGE_API_INTERNAL_TOKEN: ${KNOWLEDGE_API_INTERNAL_TOKEN:-local-dev-token}
+      LOG_FORMAT: json
+    depends_on:
+      qdrant:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8002/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
+volumes:
+  qdrant-data:
+  postgres-data:

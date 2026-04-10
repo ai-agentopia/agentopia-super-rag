@@ -72,6 +72,45 @@ K8s API access uses in-cluster service account. In local dev, binding cache fall
 - Qdrant and Postgres (for full ingest + search — see [Local Dependencies](#local-dependencies) below)
 - OpenRouter API key (for embedding — `text-embedding-3-small` via OpenRouter)
 
+### Quick start — full stack via compose
+
+The fastest way to run the complete service locally. `compose.yaml` starts Qdrant, Postgres, and the knowledge-api in the correct order. Postgres schema is applied automatically on first start.
+
+```bash
+cp .env.example .env.local
+# Set EMBEDDING_API_KEY (OpenRouter key) and optionally KNOWLEDGE_API_INTERNAL_TOKEN
+```
+
+```bash
+# Start all three services (builds knowledge-api from source)
+podman compose --env-file .env.local up --build
+
+# Docker also works
+docker compose --env-file .env.local up --build
+```
+
+Smoke checks once started:
+```bash
+curl http://localhost:8002/health
+# → {"status":"ok","service":"knowledge-api","version":"1.0.0"}
+
+curl -H "X-Internal-Token: local-dev-token" http://localhost:8002/internal/health
+# → {"status":"ok","qdrant":"ok",...}  — confirms real Qdrant + Postgres backends
+```
+
+Stop and reset:
+```bash
+# Stop, keep data
+podman compose --env-file .env.local down
+
+# Stop and delete volumes (full reset)
+podman compose --env-file .env.local down -v
+```
+
+Use the manual paths below if you need explicit control over individual services or want to run the app natively without containers.
+
+---
+
 ### 1. Native Python
 
 ```bash
