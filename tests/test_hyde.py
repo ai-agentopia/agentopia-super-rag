@@ -16,6 +16,7 @@ from unittest.mock import patch, MagicMock
 
 import pytest
 
+from models.knowledge import Citation, SearchResult
 from services.hyde import generate_hypothesis
 
 
@@ -164,6 +165,39 @@ class TestHyDEPerScopeRollout:
             assert svc.is_hyde_allowed(["scope-b"]) is True
             assert svc.is_hyde_allowed(["scope-c"]) is False
 
+    def test_mixed_scope_final_merge_uses_one_rank_space(self):
+        """Allowed HyDE results are fused with blocked dense results by rank, not raw score."""
+        from services.knowledge import KnowledgeService
+
+        svc = KnowledgeService()
+        svc.enable_hyde("allowed")
+        svc._qdrant = MagicMock()
+
+        hyde_result = SearchResult(
+            text="Allowed HyDE result",
+            score=0.016393,
+            scope="allowed",
+            citation=Citation(source="allowed.md", chunk_index=0, score=0.016393),
+        )
+        blocked_result = SearchResult(
+            text="Blocked dense result",
+            score=0.95,
+            scope="blocked",
+            citation=Citation(source="blocked.md", chunk_index=0, score=0.95),
+        )
+
+        svc._qdrant.search_scope.return_value = [blocked_result]
+        with patch.object(svc, "_search_with_hyde", return_value=[hyde_result]):
+            results = svc.search(
+                "query",
+                ["allowed", "blocked"],
+                hyde_enabled=True,
+                limit=2,
+            )
+
+        assert [r.scope for r in results] == ["allowed", "blocked"]
+        assert all(r.score < 0.1 for r in results)
+
 
 # ── Default path unchanged ────────────────────────────────────────────────
 
@@ -193,6 +227,20 @@ class TestDefaultSearchUnchanged:
         with patch("services.hyde.generate_hypothesis") as mock_gen:
             svc.search("Python", ["scope"], hyde_enabled=False)
             mock_gen.assert_not_called()
+
+    def test_service_rejects_query_expansion_and_hyde_together(self):
+        """Combined W3a + W3b enablement is explicitly rejected."""
+        from services.knowledge import KnowledgeService
+
+        svc = KnowledgeService()
+
+        with pytest.raises(ValueError, match="cannot both be enabled"):
+            svc.search(
+                "query",
+                ["scope"],
+                query_expansion_enabled=True,
+                hyde_enabled=True,
+            )
 
 
 # ── HyDE path with mocked LLM ─────────────────────────────────────────────
@@ -309,3 +357,18 @@ class TestSearchAPIHyDEParam:
                 headers={"X-Internal-Token": token},
             )
             assert resp.status_code == 200
+
+    def test_search_endpoint_rejects_query_expansion_and_hyde_together(self):
+        """GET /search rejects simultaneous W3a + W3b flags."""
+        from fastapi.testclient import TestClient
+        from main import app
+
+        token = os.environ.get("KNOWLEDGE_API_INTERNAL_TOKEN", "test-internal-token-for-tests")
+        with TestClient(app) as client:
+            resp = client.get(
+                "/api/v1/knowledge/search",
+                params={"query": "test", "query_expansion": "true", "hyde": "true"},
+                headers={"X-Internal-Token": token},
+            )
+            assert resp.status_code == 400
+            assert "cannot both be enabled" in resp.json()["detail"]

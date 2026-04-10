@@ -121,6 +121,12 @@ async def search_knowledge(
     svc = get_knowledge_service()
     auth_type, identity = auth_ctx
 
+    if query_expansion and hyde:
+        raise HTTPException(
+            status_code=400,
+            detail="query_expansion and hyde cannot both be enabled",
+        )
+
     if auth_type == "bot":
         effective_scopes = _resolve_bot_scopes(identity)
         logger.info(

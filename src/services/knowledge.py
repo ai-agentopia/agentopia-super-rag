@@ -754,6 +754,9 @@ class KnowledgeService:
         Per-scope allowlist enforced — hyde_enabled=True ignored for non-allowed scopes.
         W3a and W3b are independent; enabling both is not supported without combined eval.
         """
+        if query_expansion_enabled and hyde_enabled:
+            raise ValueError("query_expansion and hyde cannot both be enabled")
+
         # Qdrant path: fan-out across scopes, merge, sort, limit
         if self._qdrant:
             if query_expansion_enabled:
@@ -761,24 +764,23 @@ class KnowledgeService:
                 allowed = [s for s in scopes if s in self._expansion_allowed_scopes]
                 blocked = [s for s in scopes if s not in self._expansion_allowed_scopes]
 
-                all_results: list[SearchResult] = []
+                ranked_lists: list[list[SearchResult]] = []
 
                 # Expanded retrieval for allowed scopes only
                 if allowed:
-                    all_results.extend(
+                    ranked_lists.append(
                         self._search_with_expansion(
                             query, allowed, limit, min_score, query_expansion_n
                         )
                     )
 
                 # Dense-only retrieval for blocked scopes
-                for scope in blocked:
-                    try:
-                        all_results.extend(
-                            self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+                if blocked:
+                    ranked_lists.append(
+                        self._search_dense_across_scopes(
+                            query, blocked, limit, min_score
                         )
-                    except Exception as exc:
-                        logger.warning("Qdrant search failed for scope '%s': %s", scope, exc)
+                    )
 
                 if blocked:
                     logger.info(
@@ -786,8 +788,7 @@ class KnowledgeService:
                         allowed, blocked,
                     )
 
-                all_results.sort(key=lambda r: r.score, reverse=True)
-                final = all_results[:limit]
+                final = self._merge_ranked_search_results(ranked_lists, limit)
                 self._audit_search_results(final)
                 return final
 
@@ -796,20 +797,19 @@ class KnowledgeService:
                 hyde_allowed = [s for s in scopes if s in self._hyde_allowed_scopes]
                 hyde_blocked = [s for s in scopes if s not in self._hyde_allowed_scopes]
 
-                hyde_results: list[SearchResult] = []
+                ranked_lists: list[list[SearchResult]] = []
 
                 if hyde_allowed:
-                    hyde_results.extend(
+                    ranked_lists.append(
                         self._search_with_hyde(query, hyde_allowed, limit, min_score)
                     )
 
-                for scope in hyde_blocked:
-                    try:
-                        hyde_results.extend(
-                            self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+                if hyde_blocked:
+                    ranked_lists.append(
+                        self._search_dense_across_scopes(
+                            query, hyde_blocked, limit, min_score
                         )
-                    except Exception as exc:
-                        logger.warning("Qdrant search failed for scope '%s': %s", scope, exc)
+                    )
 
                 if hyde_blocked:
                     logger.info(
@@ -817,22 +817,13 @@ class KnowledgeService:
                         hyde_allowed, hyde_blocked,
                     )
 
-                hyde_results.sort(key=lambda r: r.score, reverse=True)
-                final = hyde_results[:limit]
+                final = self._merge_ranked_search_results(ranked_lists, limit)
                 self._audit_search_results(final)
                 return final
 
-            all_results_dense: list[SearchResult] = []
-            for scope in scopes:
-                try:
-                    all_results_dense.extend(
-                        self._qdrant.search_scope(query, scope, limit, min_score=min_score)
-                    )
-                except Exception as exc:
-                    logger.warning(
-                        "Qdrant search failed for scope '%s': %s", scope, exc
-                    )
-            all_results_dense.sort(key=lambda r: r.score, reverse=True)
+            all_results_dense = self._search_dense_across_scopes(
+                query, scopes, limit, min_score
+            )
             final = all_results_dense[:limit]
             self._audit_search_results(final)
             return final
@@ -871,6 +862,95 @@ class KnowledgeService:
         final = results[:limit]
         self._audit_search_results(final)
         return final
+
+    def _search_dense_across_scopes(
+        self,
+        query: str,
+        scopes: list[str],
+        limit: int,
+        min_score: float,
+    ) -> list[SearchResult]:
+        """Dense-only Qdrant search across scopes, sorted by backend score."""
+        if not self._qdrant:
+            return []
+
+        results: list[SearchResult] = []
+        for scope in scopes:
+            try:
+                results.extend(
+                    self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+                )
+            except Exception as exc:
+                logger.warning("Qdrant search failed for scope '%s': %s", scope, exc)
+        results.sort(key=lambda r: r.score, reverse=True)
+        return results[:limit]
+
+    @staticmethod
+    def _search_results_to_ranked_dicts(results: list[SearchResult]) -> list[dict[str, Any]]:
+        """Convert SearchResult objects into rank-fusion input dictionaries."""
+        ranked: list[dict[str, Any]] = []
+        for sr in results:
+            ranked.append({
+                "text": sr.text,
+                "score": sr.score,
+                "scope": sr.scope,
+                "citation": {
+                    "source": sr.citation.source,
+                    "section": sr.citation.section,
+                    "section_path": sr.citation.section_path,
+                    "page": sr.citation.page,
+                    "chunk_index": sr.citation.chunk_index,
+                    "ingested_at": sr.citation.ingested_at,
+                    "document_hash": sr.citation.document_hash,
+                },
+            })
+        return ranked
+
+    @staticmethod
+    def _ranked_dicts_to_search_results(results: list[dict[str, Any]]) -> list[SearchResult]:
+        """Convert rank-fusion dictionaries back into SearchResult objects."""
+        final: list[SearchResult] = []
+        for result in results:
+            cit = result.get("citation", {})
+            final.append(SearchResult(
+                text=result.get("text", ""),
+                score=result.get("score", 0.0),
+                scope=result.get("scope", ""),
+                citation=Citation(
+                    source=cit.get("source", ""),
+                    section=cit.get("section", ""),
+                    section_path=cit.get("section_path", ""),
+                    page=cit.get("page"),
+                    chunk_index=cit.get("chunk_index", 0),
+                    score=result.get("score", 0.0),
+                    ingested_at=cit.get("ingested_at", 0.0),
+                    document_hash=cit.get("document_hash", ""),
+                ),
+            ))
+        return final
+
+    def _merge_ranked_search_results(
+        self,
+        ranked_lists: list[list[SearchResult]],
+        limit: int,
+    ) -> list[SearchResult]:
+        """Fuse already-ranked result lists in one coherent rank space."""
+        if not ranked_lists:
+            return []
+        if len(ranked_lists) == 1:
+            return ranked_lists[0][:limit]
+
+        from services.query_expansion import rrf_merge
+
+        merged = rrf_merge(
+            [
+                self._search_results_to_ranked_dicts(results)
+                for results in ranked_lists
+                if results
+            ],
+            limit,
+        )
+        return self._ranked_dicts_to_search_results(merged)
 
     def _search_with_expansion(
         self,

@@ -137,7 +137,7 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 BM25 sparse encoding alongside dense vectors. Score fusion via RRF. Issue tracked in `agentopia-protocol` as #319. Will require Qdrant sparse vector support and per-scope evaluation.
 
-### Query expansion (W3a — implemented, not yet production-accepted)
+### Query expansion (W3a — implemented, evaluated, not approved)
 
 Generates 3 alternative phrasings via LLM, runs retrieval for original + 3 expansions, merges via RRF. Disabled by default on all scopes.
 
@@ -145,11 +145,17 @@ Generates 3 alternative phrasings via LLM, runs retrieval for original + 3 expan
 
 **Cost/latency:** 1 LLM call (~300-800ms) + 3 extra retrieval/embedding calls per search. Estimated +300-1000ms total. CTO latency budget approval required before production enablement.
 
-**Evaluation:** Simulated-expansion comparison complete (nDCG@5 +0.0652 on pilot scope). Live LLM evaluation pending — requires `OPENROUTER_API_KEY` in dev environment and CTO latency budget pre-approval. See `evaluation/results/w3a_expansion_comparison.json`.
+**Evaluation:** Simulated-expansion comparison complete (nDCG@5 +0.0652 on pilot scope; see `evaluation/results/w3a_expansion_comparison.json`). Follow-up live evaluation and one bounded model sweep did not clear the +0.02 production gate on the real pilot corpus, so W3a is retained as dormant default-off functionality only. No production scope should enable it without new evidence.
 
-### HyDE (Hypothetical Document Embedding)
+### HyDE (W3b — implemented, evaluated, not approved)
 
-Embed a generated hypothetical answer rather than the raw query. Improves recall on long-tail questions in documentation corpora. Same latency profile as query expansion. Requires separate golden-question evaluation format.
+Generate one short hypothetical answer, retrieve against that generated text, and merge `[original, HyDE]` via RRF. Disabled by default on all scopes.
+
+**Rollout control:** Per-scope allowlist via `HYDE_SCOPES` env var (comma-separated scope names) or `enable_hyde(scope)` API. Search parameter `hyde=true` is ignored unless the scope is in the allowlist. `query_expansion` and `hyde` may not be enabled together in the same request.
+
+**Cost/latency:** 1 LLM call plus one extra retrieval pass per search. Live pilot evidence in `evaluation/results/w3b_hyde_live_eval.json` showed average latency rising from 577ms to 3313ms.
+
+**Evaluation:** Live eval on `joblogic-kb/api-docs` regressed nDCG@5 from 0.9201 to 0.9175 (`-0.0026`), so W3b is not approved for production rollout on the current corpus. The implementation remains default-off and scope-gated for future re-evaluation only.
 
 ### LLM cross-encoder reranking
 

@@ -146,6 +146,52 @@ Real production documents from `ai-agentopia/docs` repo. 9 documents loaded (cor
 
 ---
 
+## W3a Evidence — Query Expansion
+
+**Script / artifact in repo:** `evaluation/w3a_expansion_comparison.py`, `evaluation/results/w3a_expansion_comparison.json`
+
+### Evidence 1: Simulated benchmark
+
+Manual/simulated alternative phrasings on `joblogic-kb/api-docs` showed positive directional signal:
+
+| Metric | Baseline | Expanded | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.7917 | 0.8568 | +0.0652 |
+| MRR | 0.7667 | 0.8250 | +0.0583 |
+
+**Status:** Complete. Useful mechanism check only — not production acceptance evidence.
+
+### Evidence 2: Live evaluation + bounded model sweep
+
+Live LLM evaluation on the real pilot corpus did **not** clear the retrieval-mode gate (`nDCG@5` must improve by `>= +0.02`):
+
+| Expansion model | nDCG@5 delta vs baseline | Result |
+|---|---|---|
+| `openai/gpt-4o-mini` | -0.0050 | Fail |
+| `openai/gpt-4.1-mini` | +0.0050 | Fail |
+
+**Current W3a status:** Implemented, default-off, **not approved** for production rollout on the current corpus. The code remains dormant and per-scope gated for future reconsideration only.
+
+---
+
+## W3b Evidence — HyDE
+
+**Results:** `evaluation/results/w3b_hyde_live_eval.json`
+
+Live HyDE evaluation on `joblogic-kb/api-docs`:
+
+| Metric | Baseline | HyDE | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.9201 | 0.9175 | -0.0026 |
+| MRR | 0.9000 | 0.9000 | +0.0000 |
+| Avg latency | 577ms | 3313ms | +2736ms |
+
+**Gate result:** Fail. HyDE did not improve `nDCG@5` and materially increased latency.
+
+**Current W3b status:** Implemented, default-off, **not approved** for production rollout on the current corpus. Future reconsideration requires a different corpus/evidence set, not a silent enablement.
+
+---
+
 ## What Is Not Evaluated Here
 
 - Reasoning quality (planner, reviewer-shadow) — owned by `agentopia-graph-executor`
