@@ -418,3 +418,149 @@ class TestSearchAPIRerankParam:
             )
             assert resp.status_code == 400
             assert "rerank and hyde cannot both be enabled" in resp.json()["detail"]
+
+
+# ── Real rerank path (Qdrant-mocked, LLM-mocked) ─────────────────────────
+
+
+class TestRealRerankPath:
+    """Exercise _rerank_search_results() with mocked Qdrant + mocked LLM.
+
+    Unlike TestRerankingPerScopeRollout which patches _rerank_search_results
+    entirely, these tests let the real method run so the score-rewrite logic
+    and the Qdrant→reranker→SearchResult conversion are exercised end-to-end.
+    """
+
+    def _make_llm_response(self, content: str) -> MagicMock:
+        mock = MagicMock()
+        mock.read.return_value = (
+            f'{{"choices":[{{"message":{{"content":"{content}"}}}}]}}'
+        ).encode()
+        mock.__enter__ = lambda s: s
+        mock.__exit__ = MagicMock(return_value=False)
+        return mock
+
+    def test_real_rerank_path_reorders_and_fixes_scores(self):
+        """Mocked Qdrant + mocked LLM drives the real _rerank_search_results.
+
+        Verifies:
+        1. _rerank_search_results() is called (not patched).
+        2. LLM-returned order is reflected in final result ordering.
+        3. Returned scores reflect reranked position (rank 0→1.0, rank 1→0.5),
+           NOT the stale cosine scores from vector retrieval.
+        4. SearchResult.score == Citation.score for both results.
+        """
+        from services.knowledge import KnowledgeService
+        from models.knowledge import Citation, SearchResult
+
+        svc = KnowledgeService()
+        svc.enable_reranking("test-scope")
+        svc._qdrant = MagicMock()
+
+        # Vector search returns doc_a first (score=0.92), doc_b second (score=0.65)
+        candidate_a = SearchResult(
+            text="Document A — highly scored by vector search",
+            score=0.92,
+            scope="test-scope",
+            citation=Citation(source="doc_a.md", chunk_index=0, score=0.92),
+        )
+        candidate_b = SearchResult(
+            text="Document B — lower vector score but more relevant to query",
+            score=0.65,
+            scope="test-scope",
+            citation=Citation(source="doc_b.md", chunk_index=0, score=0.65),
+        )
+        svc._qdrant.search_scope.return_value = [candidate_a, candidate_b]
+
+        # LLM says doc_b (index 1) is more relevant than doc_a (index 0)
+        llm_response = self._make_llm_response("1,0")
+        with patch("urllib.request.urlopen", return_value=llm_response):
+            with patch.dict(os.environ, {"EMBEDDING_API_KEY": "test-key"}, clear=False):
+                results = svc.search("query", ["test-scope"], rerank_enabled=True, limit=2)
+
+        assert len(results) == 2
+
+        # Ordering: doc_b must be first (LLM ranked it higher)
+        assert results[0].citation.source == "doc_b.md", (
+            f"Expected doc_b.md first, got {results[0].citation.source}"
+        )
+        assert results[1].citation.source == "doc_a.md", (
+            f"Expected doc_a.md second, got {results[1].citation.source}"
+        )
+
+        # Score semantics: rank-based, not stale cosine
+        assert results[0].score == 1.0, f"rank-0 score must be 1.0, got {results[0].score}"
+        assert results[1].score == 0.5, f"rank-1 score must be 0.5, got {results[1].score}"
+
+        # citation.score must match SearchResult.score
+        assert results[0].citation.score == results[0].score
+        assert results[1].citation.score == results[1].score
+
+    def test_real_rerank_path_score_monotone_decreasing(self):
+        """Reranked scores decrease with rank regardless of original vector scores."""
+        from services.knowledge import KnowledgeService
+        from models.knowledge import Citation, SearchResult
+
+        svc = KnowledgeService()
+        svc.enable_reranking("scope")
+        svc._qdrant = MagicMock()
+
+        # Three candidates — LLM returns them in reverse vector order (2,1,0)
+        candidates = [
+            SearchResult(
+                text=f"Doc {i}",
+                score=0.9 - i * 0.1,
+                scope="scope",
+                citation=Citation(source=f"doc{i}.md", chunk_index=0, score=0.9 - i * 0.1),
+            )
+            for i in range(3)
+        ]
+        svc._qdrant.search_scope.return_value = candidates
+
+        llm_response = self._make_llm_response("2,1,0")
+        with patch("urllib.request.urlopen", return_value=llm_response):
+            with patch.dict(os.environ, {"EMBEDDING_API_KEY": "test-key"}, clear=False):
+                results = svc.search("query", ["scope"], rerank_enabled=True, limit=3)
+
+        # Scores must strictly decrease with position
+        scores = [r.score for r in results]
+        assert scores == sorted(scores, reverse=True), f"Scores not monotone decreasing: {scores}"
+        assert scores[0] == 1.0
+        assert scores[1] == 0.5
+        assert round(scores[2], 6) == round(1.0 / 3, 6)
+
+    def test_real_rerank_fallback_produces_coherent_scores(self):
+        """LLM failure path returns vector-ranked order with coherent rank-based scores."""
+        from services.knowledge import KnowledgeService
+        from models.knowledge import Citation, SearchResult
+
+        svc = KnowledgeService()
+        svc.enable_reranking("scope")
+        svc._qdrant = MagicMock()
+
+        candidate_a = SearchResult(
+            text="Best vector match",
+            score=0.88,
+            scope="scope",
+            citation=Citation(source="best.md", chunk_index=0, score=0.88),
+        )
+        candidate_b = SearchResult(
+            text="Weaker vector match",
+            score=0.50,
+            scope="scope",
+            citation=Citation(source="weaker.md", chunk_index=0, score=0.50),
+        )
+        svc._qdrant.search_scope.return_value = [candidate_a, candidate_b]
+
+        # LLM fails → rerank_results returns original order
+        with patch("urllib.request.urlopen", side_effect=Exception("timeout")):
+            with patch.dict(os.environ, {"EMBEDDING_API_KEY": "test-key"}, clear=False):
+                results = svc.search("query", ["scope"], rerank_enabled=True, limit=2)
+
+        assert len(results) == 2
+        # Original vector order preserved on fallback
+        assert results[0].citation.source == "best.md"
+        assert results[1].citation.source == "weaker.md"
+        # Scores must still be rank-based (not stale cosine 0.88/0.50)
+        assert results[0].score == 1.0
+        assert results[1].score == 0.5

@@ -1214,8 +1214,14 @@ class KnowledgeService:
         """Rerank candidate SearchResults via LLM listwise scoring (W4 #18).
 
         Converts SearchResult → dicts for reranker, calls rerank_results(),
-        converts back. Returns top-limit from reranked order.
-        On LLM failure, returns top-limit from vector-ranked order.
+        overwrites scores to reflect reranked position, converts back.
+        On LLM failure, returns top-limit from vector-ranked order with
+        coherent rank-based scores.
+
+        Score semantics: score = 1/(1+rank) — rank 0 → 1.0, rank 1 → 0.5,
+        rank 2 → 0.333 … Original vector cosine scores are discarded because
+        they reflect pre-rerank similarity order, which may no longer match
+        the reranked order returned by the LLM.
         """
         from services.reranker import rerank_results
 
@@ -1224,7 +1230,14 @@ class KnowledgeService:
         reranked_dicts = rerank_results(query, candidate_dicts)
         elapsed_ms = (time.monotonic() - t0) * 1000
 
-        final = self._ranked_dicts_to_search_results(reranked_dicts[:limit])
+        # Overwrite scores with rank-based values so SearchResult.score and
+        # Citation.score reflect the reranked position, not stale cosine scores.
+        # _ranked_dicts_to_search_results() reads d["score"] for both fields.
+        top = reranked_dicts[:limit]
+        for rank, d in enumerate(top):
+            d["score"] = round(1.0 / (1 + rank), 6)
+
+        final = self._ranked_dicts_to_search_results(top)
         logger.info(
             "W4: rerank complete in %.0fms (candidates=%d, returned=%d)",
             elapsed_ms, len(candidates), len(final),
