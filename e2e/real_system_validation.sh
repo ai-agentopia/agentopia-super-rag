@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 # Real-system E2E validation for agentopia-super-rag
 #
-# Runs against the actual Agentopia dev cluster via SSH to server36.
+# Runs against the Agentopia cluster via SSH.
 # Tests the real runtime path: bot auth → binding cache → scope resolution → Qdrant search.
 #
 # Prerequisites:
-#   - SSH access to server36
-#   - kubectl access via KUBECONFIG=/etc/rancher/k3s/k3s.yaml
-#   - knowledge-api pod running in agentopia-dev namespace
+#   - SSH access to the cluster host (set via SSH_HOST env var)
+#   - kubectl access via KUBECONFIG=/etc/rancher/k3s/k3s.yaml on the cluster host
+#   - knowledge-api pod running in the target namespace
 #   - At least one bot with knowledge bindings deployed
 #
 # Usage:
-#   bash e2e/real_system_validation.sh
+#   SSH_HOST=<your-cluster-host> bash e2e/real_system_validation.sh
 #
 # What this proves:
 #   1. Service healthy with real Qdrant backend and binding cache
@@ -25,7 +25,7 @@
 #   - Dedicated test bot/scope (uses existing bots)
 #   - Postgres document store (auth failure on dev — separate issue)
 
-SSH_HOST="${SSH_HOST:-server36}"
+SSH_HOST="${SSH_HOST:?SSH_HOST must be set to your cluster host}"
 NS="agentopia-dev"
 
 PASSED=0
