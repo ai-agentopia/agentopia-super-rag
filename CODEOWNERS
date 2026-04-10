@@ -1,0 +1,6 @@
+# CODEOWNERS — agentopia-super-rag
+#
+# All files require CTO review. This repo is main-only — every PR targets main.
+# Docs, evaluation, and source all fall under the same owner.
+
+* @thanhth2813

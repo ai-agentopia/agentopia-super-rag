@@ -144,7 +144,7 @@ After a deployment, an operator can verify the service is functioning without ri
 
 ```bash
 # 1. Shallow health
-curl -s https://dev.agentopia.vn/health  # or via internal ingress
+curl -s https://<your-ingress-host>/health  # Agentopia production: https://dev.agentopia.vn/health
 
 # 2. List scopes (uses internal token)
 curl -s -H "X-Internal-Token: $KNOWLEDGE_API_INTERNAL_TOKEN" \
