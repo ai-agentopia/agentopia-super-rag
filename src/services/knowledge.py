@@ -541,6 +541,22 @@ class KnowledgeService:
         if _env_scopes:
             self._expansion_allowed_scopes = {s.strip() for s in _env_scopes.split(",") if s.strip()}
 
+        # W3b: per-scope HyDE allowlist. Only scopes in this set may use HyDE.
+        # Populated from HYDE_SCOPES env var (comma-separated) or via
+        # enable_hyde() method.
+        self._hyde_allowed_scopes: set[str] = set()
+        _env_hyde = os.getenv("HYDE_SCOPES", "")
+        if _env_hyde:
+            self._hyde_allowed_scopes = {s.strip() for s in _env_hyde.split(",") if s.strip()}
+
+        # W4: per-scope reranking allowlist. Only scopes in this set may use
+        # LLM listwise reranking. Populated from RERANK_SCOPES env var
+        # (comma-separated) or via enable_reranking() method.
+        self._reranking_allowed_scopes: set[str] = set()
+        _env_rerank = os.getenv("RERANK_SCOPES", "")
+        if _env_rerank:
+            self._reranking_allowed_scopes = {s.strip() for s in _env_rerank.split(",") if s.strip()}
+
     def enable_query_expansion(self, scope: str) -> None:
         """Enable query expansion for a specific scope (W3a #16)."""
         self._expansion_allowed_scopes.add(scope)
@@ -554,6 +570,34 @@ class KnowledgeService:
     def is_expansion_allowed(self, scopes: list[str]) -> bool:
         """Check if query expansion is allowed for any of the given scopes."""
         return any(s in self._expansion_allowed_scopes for s in scopes)
+
+    def enable_hyde(self, scope: str) -> None:
+        """Enable HyDE for a specific scope (W3b #17)."""
+        self._hyde_allowed_scopes.add(scope)
+        logger.info("W3b: HyDE enabled for scope '%s'", scope)
+
+    def disable_hyde(self, scope: str) -> None:
+        """Disable HyDE for a specific scope (W3b #17)."""
+        self._hyde_allowed_scopes.discard(scope)
+        logger.info("W3b: HyDE disabled for scope '%s'", scope)
+
+    def is_hyde_allowed(self, scopes: list[str]) -> bool:
+        """Check if HyDE is allowed for any of the given scopes."""
+        return any(s in self._hyde_allowed_scopes for s in scopes)
+
+    def enable_reranking(self, scope: str) -> None:
+        """Enable LLM listwise reranking for a specific scope (W4 #18)."""
+        self._reranking_allowed_scopes.add(scope)
+        logger.info("W4: reranking enabled for scope '%s'", scope)
+
+    def disable_reranking(self, scope: str) -> None:
+        """Disable LLM listwise reranking for a specific scope (W4 #18)."""
+        self._reranking_allowed_scopes.discard(scope)
+        logger.info("W4: reranking disabled for scope '%s'", scope)
+
+    def is_reranking_allowed(self, scopes: list[str]) -> bool:
+        """Check if reranking is allowed for any of the given scopes."""
+        return any(s in self._reranking_allowed_scopes for s in scopes)
 
     def ingest(
         self,
@@ -710,6 +754,9 @@ class KnowledgeService:
         min_score: float = 0.0,
         query_expansion_enabled: bool = False,
         query_expansion_n: int = 3,
+        hyde_enabled: bool = False,
+        rerank_enabled: bool = False,
+        rerank_candidate_k: int = 0,
     ) -> list[SearchResult]:
         """Search across knowledge scopes.
 
@@ -722,7 +769,30 @@ class KnowledgeService:
         2. Run retrieval for original + N expansions
         3. Merge results via RRF (Reciprocal Rank Fusion)
         4. On LLM failure, fall back silently to dense-only search
+
+        When hyde_enabled=True (W3b #17):
+        1. Generate one hypothetical answer via LLM
+        2. Retrieve using the hypothesis embedding
+        3. Merge HyDE results with original query results via RRF
+        4. On LLM failure, fall back silently to dense-only search
+        Per-scope allowlist enforced — hyde_enabled=True ignored for non-allowed scopes.
+        W3a and W3b are independent; enabling both is not supported without combined eval.
+
+        When rerank_enabled=True (W4 #18):
+        1. Retrieve candidate_k candidates from Qdrant (candidate_k > limit)
+        2. Rerank via LLM listwise scoring (single LLM call for all candidates)
+        3. Return top-limit from reranked order
+        4. On LLM failure, fall back silently to vector-ranked order
+        Per-scope allowlist enforced. Cannot be combined with W3a or W3b without
+        a combined evaluation run.
         """
+        if query_expansion_enabled and hyde_enabled:
+            raise ValueError("query_expansion and hyde cannot both be enabled")
+        if rerank_enabled and query_expansion_enabled:
+            raise ValueError("rerank and query_expansion cannot both be enabled")
+        if rerank_enabled and hyde_enabled:
+            raise ValueError("rerank and hyde cannot both be enabled")
+
         # Qdrant path: fan-out across scopes, merge, sort, limit
         if self._qdrant:
             if query_expansion_enabled:
@@ -730,24 +800,23 @@ class KnowledgeService:
                 allowed = [s for s in scopes if s in self._expansion_allowed_scopes]
                 blocked = [s for s in scopes if s not in self._expansion_allowed_scopes]
 
-                all_results: list[SearchResult] = []
+                ranked_lists: list[list[SearchResult]] = []
 
                 # Expanded retrieval for allowed scopes only
                 if allowed:
-                    all_results.extend(
+                    ranked_lists.append(
                         self._search_with_expansion(
                             query, allowed, limit, min_score, query_expansion_n
                         )
                     )
 
                 # Dense-only retrieval for blocked scopes
-                for scope in blocked:
-                    try:
-                        all_results.extend(
-                            self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+                if blocked:
+                    ranked_lists.append(
+                        self._search_dense_across_scopes(
+                            query, blocked, limit, min_score
                         )
-                    except Exception as exc:
-                        logger.warning("Qdrant search failed for scope '%s': %s", scope, exc)
+                    )
 
                 if blocked:
                     logger.info(
@@ -755,22 +824,82 @@ class KnowledgeService:
                         allowed, blocked,
                     )
 
-                all_results.sort(key=lambda r: r.score, reverse=True)
-                final = all_results[:limit]
+                final = self._merge_ranked_search_results(ranked_lists, limit)
                 self._audit_search_results(final)
                 return final
 
-            all_results_dense: list[SearchResult] = []
-            for scope in scopes:
-                try:
-                    all_results_dense.extend(
-                        self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+            if hyde_enabled:
+                # W3b: split scopes into allowed (HyDE) vs blocked (dense-only)
+                hyde_allowed = [s for s in scopes if s in self._hyde_allowed_scopes]
+                hyde_blocked = [s for s in scopes if s not in self._hyde_allowed_scopes]
+
+                ranked_lists: list[list[SearchResult]] = []
+
+                if hyde_allowed:
+                    ranked_lists.append(
+                        self._search_with_hyde(query, hyde_allowed, limit, min_score)
                     )
-                except Exception as exc:
-                    logger.warning(
-                        "Qdrant search failed for scope '%s': %s", scope, exc
+
+                if hyde_blocked:
+                    ranked_lists.append(
+                        self._search_dense_across_scopes(
+                            query, hyde_blocked, limit, min_score
+                        )
                     )
-            all_results_dense.sort(key=lambda r: r.score, reverse=True)
+
+                if hyde_blocked:
+                    logger.info(
+                        "W3b: HyDE applied to %s, dense-only for %s",
+                        hyde_allowed, hyde_blocked,
+                    )
+
+                final = self._merge_ranked_search_results(ranked_lists, limit)
+                self._audit_search_results(final)
+                return final
+
+            if rerank_enabled:
+                # W4: dense retrieve candidate_k, rerank, return top-limit
+                rerank_allowed = [s for s in scopes if s in self._reranking_allowed_scopes]
+                rerank_blocked = [s for s in scopes if s not in self._reranking_allowed_scopes]
+
+                if rerank_allowed:
+                    from services.reranker import DEFAULT_CANDIDATE_K
+                    candidate_k = rerank_candidate_k or DEFAULT_CANDIDATE_K
+                    # Retrieve more candidates than needed for reranking
+                    candidates = self._search_dense_across_scopes(
+                        query, rerank_allowed, max(candidate_k, limit), min_score
+                    )
+                    reranked_results = self._rerank_search_results(query, candidates, limit)
+                else:
+                    reranked_results = []
+
+                # Dense-only for blocked scopes
+                dense_results = (
+                    self._search_dense_across_scopes(query, rerank_blocked, limit, min_score)
+                    if rerank_blocked
+                    else []
+                )
+
+                if rerank_blocked:
+                    logger.info(
+                        "W4: reranking applied to %s, dense-only for %s",
+                        rerank_allowed, rerank_blocked,
+                    )
+
+                # Merge allowed (reranked) and blocked (dense) via RRF
+                ranked_lists: list[list[SearchResult]] = []
+                if reranked_results:
+                    ranked_lists.append(reranked_results)
+                if dense_results:
+                    ranked_lists.append(dense_results)
+
+                final = self._merge_ranked_search_results(ranked_lists, limit)
+                self._audit_search_results(final)
+                return final
+
+            all_results_dense = self._search_dense_across_scopes(
+                query, scopes, limit, min_score
+            )
             final = all_results_dense[:limit]
             self._audit_search_results(final)
             return final
@@ -809,6 +938,95 @@ class KnowledgeService:
         final = results[:limit]
         self._audit_search_results(final)
         return final
+
+    def _search_dense_across_scopes(
+        self,
+        query: str,
+        scopes: list[str],
+        limit: int,
+        min_score: float,
+    ) -> list[SearchResult]:
+        """Dense-only Qdrant search across scopes, sorted by backend score."""
+        if not self._qdrant:
+            return []
+
+        results: list[SearchResult] = []
+        for scope in scopes:
+            try:
+                results.extend(
+                    self._qdrant.search_scope(query, scope, limit, min_score=min_score)
+                )
+            except Exception as exc:
+                logger.warning("Qdrant search failed for scope '%s': %s", scope, exc)
+        results.sort(key=lambda r: r.score, reverse=True)
+        return results[:limit]
+
+    @staticmethod
+    def _search_results_to_ranked_dicts(results: list[SearchResult]) -> list[dict[str, Any]]:
+        """Convert SearchResult objects into rank-fusion input dictionaries."""
+        ranked: list[dict[str, Any]] = []
+        for sr in results:
+            ranked.append({
+                "text": sr.text,
+                "score": sr.score,
+                "scope": sr.scope,
+                "citation": {
+                    "source": sr.citation.source,
+                    "section": sr.citation.section,
+                    "section_path": sr.citation.section_path,
+                    "page": sr.citation.page,
+                    "chunk_index": sr.citation.chunk_index,
+                    "ingested_at": sr.citation.ingested_at,
+                    "document_hash": sr.citation.document_hash,
+                },
+            })
+        return ranked
+
+    @staticmethod
+    def _ranked_dicts_to_search_results(results: list[dict[str, Any]]) -> list[SearchResult]:
+        """Convert rank-fusion dictionaries back into SearchResult objects."""
+        final: list[SearchResult] = []
+        for result in results:
+            cit = result.get("citation", {})
+            final.append(SearchResult(
+                text=result.get("text", ""),
+                score=result.get("score", 0.0),
+                scope=result.get("scope", ""),
+                citation=Citation(
+                    source=cit.get("source", ""),
+                    section=cit.get("section", ""),
+                    section_path=cit.get("section_path", ""),
+                    page=cit.get("page"),
+                    chunk_index=cit.get("chunk_index", 0),
+                    score=result.get("score", 0.0),
+                    ingested_at=cit.get("ingested_at", 0.0),
+                    document_hash=cit.get("document_hash", ""),
+                ),
+            ))
+        return final
+
+    def _merge_ranked_search_results(
+        self,
+        ranked_lists: list[list[SearchResult]],
+        limit: int,
+    ) -> list[SearchResult]:
+        """Fuse already-ranked result lists in one coherent rank space."""
+        if not ranked_lists:
+            return []
+        if len(ranked_lists) == 1:
+            return ranked_lists[0][:limit]
+
+        from services.query_expansion import rrf_merge
+
+        merged = rrf_merge(
+            [
+                self._search_results_to_ranked_dicts(results)
+                for results in ranked_lists
+                if results
+            ],
+            limit,
+        )
+        return self._ranked_dicts_to_search_results(merged)
 
     def _search_with_expansion(
         self,
@@ -892,6 +1110,138 @@ class KnowledgeService:
             total_ms, expansion_ms, total_ms - expansion_ms, len(final),
         )
         self._audit_search_results(final)
+        return final
+
+    def _search_with_hyde(
+        self,
+        query: str,
+        scopes: list[str],
+        limit: int,
+        min_score: float,
+    ) -> list[SearchResult]:
+        """Search with HyDE (W3b #17).
+
+        1. Generate one hypothetical answer via LLM
+        2. Retrieve using the hypothesis embedding
+        3. Merge HyDE results with original query results via RRF
+        4. On LLM failure, fall back to dense-only search
+        """
+        from services.hyde import generate_hypothesis
+        from services.query_expansion import rrf_merge
+
+        t0 = time.monotonic()
+        hypothesis = generate_hypothesis(query)
+        hypothesis_ms = (time.monotonic() - t0) * 1000
+
+        def _retrieve(q: str) -> list[dict]:
+            results_for_q: list[dict] = []
+            for scope in scopes:
+                try:
+                    sr_list = self._qdrant.search_scope(q, scope, limit, min_score=min_score)
+                    for sr in sr_list:
+                        results_for_q.append({
+                            "text": sr.text,
+                            "score": sr.score,
+                            "scope": sr.scope,
+                            "citation": {
+                                "source": sr.citation.source,
+                                "section": sr.citation.section,
+                                "section_path": sr.citation.section_path,
+                                "page": sr.citation.page,
+                                "chunk_index": sr.citation.chunk_index,
+                                "ingested_at": sr.citation.ingested_at,
+                                "document_hash": sr.citation.document_hash,
+                            },
+                        })
+                except Exception as exc:
+                    logger.warning("W3b: search failed for scope '%s': %s", scope, exc)
+            return results_for_q
+
+        # Always include original query results
+        original_results = _retrieve(query)
+
+        if hypothesis:
+            # Merge: [original, HyDE] via RRF
+            hyde_results = _retrieve(hypothesis)
+            ranked_lists = [original_results, hyde_results]
+            logger.info(
+                "W3b: RRF merge — original=%d results, HyDE=%d results (%.0fms generation)",
+                len(original_results), len(hyde_results), hypothesis_ms,
+            )
+        else:
+            # Fallback: hypothesis generation failed, dense-only
+            ranked_lists = [original_results]
+            logger.info(
+                "W3b: falling back to dense-only (hypothesis generation failed, %.0fms)",
+                hypothesis_ms,
+            )
+
+        merged = rrf_merge(ranked_lists, limit)
+
+        final = []
+        for r in merged:
+            cit = r.get("citation", {})
+            final.append(SearchResult(
+                text=r.get("text", ""),
+                score=r.get("score", 0.0),
+                scope=r.get("scope", ""),
+                citation=Citation(
+                    source=cit.get("source", ""),
+                    section=cit.get("section", ""),
+                    section_path=cit.get("section_path", ""),
+                    page=cit.get("page"),
+                    chunk_index=cit.get("chunk_index", 0),
+                    score=r.get("score", 0.0),
+                    ingested_at=cit.get("ingested_at", 0.0),
+                    document_hash=cit.get("document_hash", ""),
+                ),
+            ))
+
+        total_ms = (time.monotonic() - t0) * 1000
+        logger.info(
+            "W3b: completed in %.0fms (hypothesis=%.0fms, retrieval=%.0fms, results=%d)",
+            total_ms, hypothesis_ms, total_ms - hypothesis_ms, len(final),
+        )
+        self._audit_search_results(final)
+        return final
+
+    def _rerank_search_results(
+        self,
+        query: str,
+        candidates: list[SearchResult],
+        limit: int,
+    ) -> list[SearchResult]:
+        """Rerank candidate SearchResults via LLM listwise scoring (W4 #18).
+
+        Converts SearchResult → dicts for reranker, calls rerank_results(),
+        overwrites scores to reflect reranked position, converts back.
+        On LLM failure, returns top-limit from vector-ranked order with
+        coherent rank-based scores.
+
+        Score semantics: score = 1/(1+rank) — rank 0 → 1.0, rank 1 → 0.5,
+        rank 2 → 0.333 … Original vector cosine scores are discarded because
+        they reflect pre-rerank similarity order, which may no longer match
+        the reranked order returned by the LLM.
+        """
+        from services.reranker import rerank_results
+
+        t0 = time.monotonic()
+        candidate_dicts = self._search_results_to_ranked_dicts(candidates)
+        reranked_dicts = rerank_results(query, candidate_dicts)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+
+        # Overwrite scores with rank-based values so SearchResult.score and
+        # Citation.score reflect the reranked position, not stale cosine scores.
+        # _ranked_dicts_to_search_results() reads d["score"] for both fields.
+        top = reranked_dicts[:limit]
+        for rank, d in enumerate(top):
+            d["score"] = round(1.0 / (1 + rank), 6)
+
+        final = self._ranked_dicts_to_search_results(top)
+        logger.info(
+            "W4: rerank complete in %.0fms (candidates=%d, returned=%d)",
+            elapsed_ms, len(candidates), len(final),
+        )
         return final
 
     @staticmethod
@@ -1054,7 +1404,10 @@ class QdrantBackend:
         self._embedding_model = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-small")
         self._embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://openrouter.ai/api/v1/embeddings")
         self._embedding_timeout = int(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30"))
-        self._embedding_api_key = os.getenv("OPENROUTER_API_KEY", "")
+        self._embedding_api_key = (
+            os.getenv("EMBEDDING_API_KEY", "")
+            or os.getenv("OPENROUTER_API_KEY", "")
+        )
 
         # Hybrid retrieval config (#319, frozen)
         self._hybrid_enabled = os.getenv("HYBRID_SEARCH_ENABLED", "false").lower() == "true"

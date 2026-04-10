@@ -1,0 +1,171 @@
+{
+  "evaluation_type": "live_llm",
+  "date": "2026-04-10",
+  "wave": "W3b",
+  "scope": "joblogic-kb/api-docs",
+  "queries": 10,
+  "generation_model": "openai/gpt-4o-mini",
+  "merge": "RRF [original, HyDE], k=60",
+  "baseline": {
+    "ndcg5": 0.9201070403645358,
+    "mrr": 0.9,
+    "avg_latency_ms": 577.2641998977633
+  },
+  "hyde": {
+    "ndcg5": 0.9174720995481762,
+    "mrr": 0.9,
+    "avg_latency_ms": 3312.7512418926926,
+    "avg_generation_ms": 2041.9729292974807,
+    "p50_ms": 3238.5704169864766,
+    "p95_ms": 3967.8128749947064
+  },
+  "delta": {
+    "ndcg5": -0.0026,
+    "mrr": 0.0
+  },
+  "gate_threshold_ndcg5": 0.02,
+  "gate_result": "FAIL",
+  "latency_note": "Measured through 3-hop SSH tunnel. Production pod-to-pod: ~400-800ms generation + ~300ms retrieval overhead.",
+  "per_query": [
+    {
+      "id": "rp-01",
+      "baseline": {
+        "id": "rp-01",
+        "ndcg": 0.9502344167898356,
+        "mrr": 1.0
+      },
+      "hyde": {
+        "id": "rp-01",
+        "ndcg": 0.9238850086262381,
+        "mrr": 1.0
+      },
+      "hypothesis_preview": "The core services in the Agentopia platform architecture include the Agent Manag"
+    },
+    {
+      "id": "rp-02",
+      "baseline": {
+        "id": "rp-02",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hyde": {
+        "id": "rp-02",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hypothesis_preview": "Bot provisioning involves the automated setup and configuration of bots within a"
+    },
+    {
+      "id": "rp-03",
+      "baseline": {
+        "id": "rp-03",
+        "ndcg": 0.66967181649423,
+        "mrr": 0.5
+      },
+      "hyde": {
+        "id": "rp-03",
+        "ndcg": 0.6199062332840657,
+        "mrr": 0.5
+      },
+      "hypothesis_preview": "Memory architecture refers to the design and organization of a computer's memory"
+    },
+    {
+      "id": "rp-04",
+      "baseline": {
+        "id": "rp-04",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hyde": {
+        "id": "rp-04",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hypothesis_preview": "The governed PR (Pull Request) review workflow operates by establishing a struct"
+    },
+    {
+      "id": "rp-05",
+      "baseline": {
+        "id": "rp-05",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hyde": {
+        "id": "rp-05",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hypothesis_preview": "The dual-lane interaction model is a framework used in system design that deline"
+    },
+    {
+      "id": "rp-06",
+      "baseline": {
+        "id": "rp-06",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hyde": {
+        "id": "rp-06",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hypothesis_preview": "In the A2A (Agent-to-Agent) thread model, agents communicate by establishing dir"
+    },
+    {
+      "id": "rp-07",
+      "baseline": {
+        "id": "rp-07",
+        "ndcg": 0.9502344167898356,
+        "mrr": 1.0
+      },
+      "hyde": {
+        "id": "rp-07",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hypothesis_preview": "The SA Knowledge Base is a structured repository of information that enhances th"
+    },
+    {
+      "id": "rp-08",
+      "baseline": {
+        "id": "rp-08",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hyde": {
+        "id": "rp-08",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hypothesis_preview": "The production acceptance criteria for the SA Knowledge Base include accuracy, c"
+    },
+    {
+      "id": "rp-09",
+      "baseline": {
+        "id": "rp-09",
+        "ndcg": 0.6309297535714575,
+        "mrr": 0.5
+      },
+      "hyde": {
+        "id": "rp-09",
+        "ndcg": 0.6309297535714575,
+        "mrr": 0.5
+      },
+      "hypothesis_preview": "In the A2A (Air-to-Air) collaboration system, human-in-the-loop controls include"
+    },
+    {
+      "id": "rp-10",
+      "baseline": {
+        "id": "rp-10",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hyde": {
+        "id": "rp-10",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "hypothesis_preview": "The reviewer bot has permissions to access and analyze user-generated content fo"
+    }
+  ]
+}

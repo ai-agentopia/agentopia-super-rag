@@ -8,21 +8,36 @@ All configuration is injected via environment variables. No config file is read 
 
 | Variable | Description |
 |---|---|
-| `QDRANT_URL` | Qdrant service URL (e.g. `http://qdrant.agentopia-dev.svc.cluster.local:6333`) |
-| `POSTGRES_DSN` | PostgreSQL connection string |
-| `EMBEDDING_API_URL` | Embedding API base URL (e.g. `https://openrouter.ai/api/v1/embeddings`) |
-| `EMBEDDING_API_KEY` | API key for embedding service |
+| `QDRANT_URL` | Qdrant service URL (e.g. `http://qdrant.agentopia-dev.svc.cluster.local:6333`). Unset → in-memory vector fallback (no persistence). |
+| `DATABASE_URL` | PostgreSQL connection string (e.g. `postgresql://user:pass@host:5432/agentopia`). Unset → `InMemoryDocumentStore` (no document lifecycle persistence). |
+| `EMBEDDING_API_KEY` | API key for OpenRouter (embedding and LLM calls) |
 | `KNOWLEDGE_API_INTERNAL_TOKEN` | Shared secret for `X-Internal-Token` auth (bot-config-api → knowledge-api) |
-| `K8S_NAMESPACE` | K8s namespace to read ArgoCD Application CRDs from |
+| `K8S_NAMESPACE` | K8s namespace to read ArgoCD Application CRDs from (binding cache) |
 
 ### Optional
 
 | Variable | Default | Description |
 |---|---|---|
-| `EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Embedding model name |
-| `EMBEDDING_BASE_URL` | (same as `EMBEDDING_API_URL` base) | Override if different from embedding URL |
-| `BINDING_RECONCILE_INTERVAL_SECONDS` | `300` | How often to reconcile K8s binding cache |
+| `EMBEDDING_BASE_URL` | `https://openrouter.ai/api/v1/embeddings` | OpenRouter API base URL. Used for embedding calls and (when `LLM_PROXY_URL` unset) for W3a/W3b/W4 LLM calls. |
+| `EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Embedding model name. In production via agentopia-llm-proxy/OpenRouter, must include provider prefix: `openrouter/openai/text-embedding-3-small`. |
+| `BINDING_RECONCILE_INTERVAL_SECS` | `300` | How often to reconcile K8s binding cache (seconds) |
 | `LOG_LEVEL` | `INFO` | Structured log level |
+| `LOG_FORMAT` | `text` | Set to `json` for structured JSON log output |
+| `PORT` | `8002` | Container port for uvicorn |
+
+### Optional — dormant retrieval features (all default-off)
+
+These env vars activate W-series retrieval features that are **implemented but not approved for production**. All are no-ops unless a scope is explicitly added to the allowlist. See `docs/evaluation.md` for gate status.
+
+| Variable | Default | Description |
+|---|---|---|
+| `LLM_PROXY_URL` | `""` | Base URL for LLM proxy (used by W3a, W3b, W4). Falls back to OpenRouter if unset. |
+| `QUERY_EXPANSION_SCOPES` | `""` | Comma-separated scope names allowed to use W3a query expansion |
+| `HYDE_SCOPES` | `""` | Comma-separated scope names allowed to use W3b HyDE retrieval |
+| `RERANK_SCOPES` | `""` | Comma-separated scope names allowed to use W4 LLM listwise reranking |
+| `RERANK_MODEL` | `openai/gpt-4o-mini` | LLM model for W4 reranking (without provider prefix) |
+| `RERANK_TIMEOUT_MS` | `5000` | Timeout for W4 reranking LLM call (milliseconds) |
+| `RERANK_CANDIDATE_K` | `20` | Candidate pool size for W4 reranking (retrieved before LLM reorders) |
 
 ---
 
@@ -64,16 +79,27 @@ This endpoint requires `X-Internal-Token`.
 
 ---
 
+## Database Schema
+
+Postgres requires two migrations applied in order:
+
+```bash
+psql -d <database> -f db/022_document_records.sql   # document lifecycle table
+psql -d agentopia -f db/023_source_type.sql         # source_type column
+```
+
+These are idempotent (`CREATE TABLE IF NOT EXISTS`, `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`).
+
+---
+
 ## Deployment Flow
 
-1. Push to `dev` branch in `agentopia-protocol` (current source)
+1. Push to `main` branch in `agentopia-super-rag` (this repo — main-only, no dev/uat branches)
 2. GitHub Actions: fast test gate → Docker build → push `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}`
 3. ArgoCD Image Updater detects new `dev-{sha}` tag → updates Helm values in `agentopia-infra`
 4. ArgoCD reconciles `agentopia-base` app → rolling deployment in `agentopia-dev`
 5. K8s liveness probe verifies `/health` after rollout
 6. Binding cache rebuilds on startup (reads K8s CRDs for all bots)
-
-After extraction to this repo, step 1 will be a push to this repo's `dev` branch. Steps 2–6 are unchanged.
 
 ---
 
@@ -118,7 +144,7 @@ After a deployment, an operator can verify the service is functioning without ri
 
 ```bash
 # 1. Shallow health
-curl -s https://dev.agentopia.vn/api/v1/knowledge/health  # or via internal ingress
+curl -s https://<your-ingress-host>/health  # Agentopia production: https://dev.agentopia.vn/health
 
 # 2. List scopes (uses internal token)
 curl -s -H "X-Internal-Token: $KNOWLEDGE_API_INTERNAL_TOKEN" \

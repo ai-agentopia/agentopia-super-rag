@@ -18,6 +18,7 @@ It does not make workflow decisions, does not call LLMs for reasoning, and does 
 /api/v1/knowledge/{scope}/reindex               POST   — re-embed all docs in scope
 /api/v1/knowledge/{scope}/documents             GET    — list documents in scope
 /api/v1/knowledge/{scope}/documents/{source}    DELETE — remove specific document by source path
+/api/v1/knowledge/webhook                       POST   — RETIRED (returns 410). Use /{scope}/ingest.
 /internal/health                                GET    — internal health: Qdrant + binding cache + proxy config
 /internal/binding-sync                          POST   — webhook: bot-config-api pushes binding updates
 /internal/binding-sync/{bot_name}               GET    — query single bot binding state
@@ -44,7 +45,7 @@ It does not make workflow decisions, does not call LLMs for reasoning, and does 
 ### agentopia-infra
 
 - Deployment manifests live in `agentopia-infra/charts/agentopia-base/`. The service is deployed as part of the base platform Helm chart, not as a standalone ArgoCD Application.
-- Image tag is tracked by ArgoCD Image Updater (pattern: `dev-{sha}` on `dev` image builds).
+- Image tag is tracked by ArgoCD Image Updater (pattern: `dev-{sha}` — tag format, produced on push to `main`).
 
 ### agentopia-graph-executor
 
@@ -75,7 +76,7 @@ A bot can only search scopes present in its binding. Scope access cannot be elev
 
 ## Retrieval Pipeline (Current Production Baseline)
 
-**Dense-only vector search.** Hybrid retrieval (BM25 + dense) is planned but not yet shipped.
+**Dense-only vector search.** Hybrid retrieval (BM25 + dense) is frozen — see W2 below.
 
 ### Ingest path
 
@@ -87,7 +88,7 @@ document input (PDF / HTML / Markdown / code)
     ├── chunk     (fixed-size 512 tokens / 50 overlap, or paragraph, or code-aware)
     │             Strategy is per-ingest configurable. Default: fixed-size.
     │
-    ├── embed     (POST to EMBEDDING_API_URL, model: text-embedding-3-small, 1536d)
+    ├── embed     (POST to EMBEDDING_BASE_URL, model: text-embedding-3-small, 1536d)
     │             Circuit breaker: 5 consecutive failures → open for 300s (5 min)
     │
     ├── upsert    → Qdrant collection (kb-{sha256_hex[:16]} of scope identity)
@@ -133,11 +134,11 @@ The following are planned retrieval quality improvements, labeled explicitly as 
 
 **Behavior:** `section_path` is populated automatically for `MARKDOWN_AWARE` chunks. Empty for all other strategies (backward compatible). Additive field — no API contract change, no caller changes required.
 
-### Sparse index / hybrid retrieval (BM25 + dense)
+### Sparse index / hybrid retrieval (BM25 + dense) — W2 FROZEN
 
-BM25 sparse encoding alongside dense vectors. Score fusion via RRF. Issue tracked in `agentopia-protocol` as #319. Will require Qdrant sparse vector support and per-scope evaluation.
+BM25 sparse encoding alongside dense vectors. Score fusion via RRF. **Frozen — conditional reopen only** ([agentopia-super-rag#15](https://github.com/ai-agentopia/agentopia-super-rag/issues/15)). Reopen requires: Qdrant sparse vector support confirmed, dedicated evaluation evidence on a real production scope, and explicit CTO reopen. No code exists for this item. Default dense-only path is unchanged.
 
-### Query expansion (W3a — implemented, not yet production-accepted)
+### Query expansion (W3a — implemented, evaluated, not approved)
 
 Generates 3 alternative phrasings via LLM, runs retrieval for original + 3 expansions, merges via RRF. Disabled by default on all scopes.
 
@@ -145,14 +146,26 @@ Generates 3 alternative phrasings via LLM, runs retrieval for original + 3 expan
 
 **Cost/latency:** 1 LLM call (~300-800ms) + 3 extra retrieval/embedding calls per search. Estimated +300-1000ms total. CTO latency budget approval required before production enablement.
 
-**Evaluation:** Simulated-expansion comparison complete (nDCG@5 +0.0652 on pilot scope). Live LLM evaluation pending — requires `OPENROUTER_API_KEY` in dev environment and CTO latency budget pre-approval. See `evaluation/results/w3a_expansion_comparison.json`.
+**Evaluation:** Simulated-expansion comparison complete (nDCG@5 +0.0652 on pilot scope; see `evaluation/results/w3a_expansion_comparison.json`). Follow-up live evaluation and one bounded model sweep did not clear the +0.02 production gate on the real pilot corpus, so W3a is retained as dormant default-off functionality only. No production scope should enable it without new evidence.
 
-### HyDE (Hypothetical Document Embedding)
+### HyDE (W3b — implemented, evaluated, not approved)
 
-Embed a generated hypothetical answer rather than the raw query. Improves recall on long-tail questions in documentation corpora. Same latency profile as query expansion. Requires separate golden-question evaluation format.
+Generate one short hypothetical answer, retrieve against that generated text, and merge `[original, HyDE]` via RRF. Disabled by default on all scopes.
 
-### LLM cross-encoder reranking
+**Rollout control:** Per-scope allowlist via `HYDE_SCOPES` env var (comma-separated scope names) or `enable_hyde(scope)` API. Search parameter `hyde=true` is ignored unless the scope is in the allowlist. `query_expansion` and `hyde` may not be enabled together in the same request.
 
-Re-score top-k candidates with a cross-encoder model after initial retrieval. Highest quality lift potential, highest per-query cost. Sequenced after query expansion and HyDE in the roadmap.
+**Cost/latency:** 1 LLM call plus one extra retrieval pass per search. Live pilot evidence in `evaluation/results/w3b_hyde_live_eval.json` showed average latency rising from 577ms to 3313ms.
+
+**Evaluation:** Live eval on `joblogic-kb/api-docs` regressed nDCG@5 from 0.9201 to 0.9175 (`-0.0026`), so W3b is not approved for production rollout on the current corpus. The implementation remains default-off and scope-gated for future re-evaluation only.
+
+### LLM listwise reranking (W4 — implemented, evaluated, not approved)
+
+Retrieve K=20 candidates (K > final limit), send all candidates to LLM in one call for listwise relevance ranking, return top-`limit` from reranked order. Disabled by default on all scopes.
+
+**Rollout control:** Per-scope allowlist via `RERANK_SCOPES` env var (comma-separated scope names) or `enable_reranking(scope)` API. Search parameter `rerank=true` is ignored unless the scope is in the allowlist. `rerank` may not be combined with `query_expansion` or `hyde` in the same request (no combined-path evaluation exists).
+
+**Cost/latency:** 1 LLM call per reranked search. K=20 candidates × ~300 chars each ≈ 6000 input tokens + ~50 output tokens. At gpt-4o-mini pricing: ~$0.0009/query. Live pilot evidence in `evaluation/results/w4_reranking_live_eval.json` showed average reranking latency of 908ms (tunnel-inflated; production pod-to-pod: ~300–800ms).
+
+**Evaluation:** Live eval on `joblogic-kb/api-docs` regressed nDCG@5 from 0.5262 (baseline) to 0.4024 (`-0.1238`). The reranker (gpt-4o-mini) actively misranked domain-specific documents due to lack of domain knowledge. W4 is not approved for production rollout on the current corpus. Implementation remains default-off and scope-gated for future re-evaluation with a domain-tuned reranker or different corpus.
 
 All evolution items must pass the evaluation gate (see [evaluation.md](evaluation.md)) before enabling on any production scope.

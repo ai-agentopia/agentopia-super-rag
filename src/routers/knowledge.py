@@ -114,17 +114,35 @@ async def search_knowledge(
     scopes: list[str] = Query(default=[]),
     limit: int = Query(default=5, ge=1, le=50),
     query_expansion: bool = Query(default=False, description="Enable W3a query expansion (per-scope opt-in)"),
+    hyde: bool = Query(default=False, description="Enable W3b HyDE retrieval (per-scope opt-in)"),
+    rerank: bool = Query(default=False, description="Enable W4 LLM listwise reranking (per-scope opt-in)"),
     auth_ctx=Depends(require_knowledge_read),
 ) -> dict[str, Any]:
     """Search knowledge. Bot: server-side scope resolution via BindingCache."""
     svc = get_knowledge_service()
     auth_type, identity = auth_ctx
 
+    if query_expansion and hyde:
+        raise HTTPException(
+            status_code=400,
+            detail="query_expansion and hyde cannot both be enabled",
+        )
+    if rerank and query_expansion:
+        raise HTTPException(
+            status_code=400,
+            detail="rerank and query_expansion cannot both be enabled",
+        )
+    if rerank and hyde:
+        raise HTTPException(
+            status_code=400,
+            detail="rerank and hyde cannot both be enabled",
+        )
+
     if auth_type == "bot":
         effective_scopes = _resolve_bot_scopes(identity)
         logger.info(
-            "knowledge_search: bot=%s resolved_scopes=%s query_len=%d expansion=%s",
-            identity, effective_scopes, len(query), query_expansion,
+            "knowledge_search: bot=%s resolved_scopes=%s query_len=%d expansion=%s hyde=%s rerank=%s",
+            identity, effective_scopes, len(query), query_expansion, hyde, rerank,
         )
     else:
         effective_scopes = scopes if scopes else [s.name for s in svc.list_scopes()]
@@ -137,6 +155,8 @@ async def search_knowledge(
         scopes=effective_scopes,
         limit=limit,
         query_expansion_enabled=query_expansion,
+        hyde_enabled=hyde,
+        rerank_enabled=rerank,
     )
     return {"results": [r.model_dump() for r in results], "count": len(results)}
 

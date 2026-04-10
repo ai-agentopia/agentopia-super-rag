@@ -22,15 +22,18 @@ These metrics were established during the Super RAG production milestone (Phase 
 ### Location (current source)
 
 ```
-agentopia-protocol/knowledge-api/src/evaluation/
-├── datasets/              ← labeled question sets per scope
-├── retrieval_metrics.py   ← nDCG, MRR, P@k, R@k computation
-├── phase1a_runner.py      ← Phase 1a evaluation runner
-├── phase1b_baseline.py    ← Phase 1b dense-only baseline
-├── e2e_baseline_test.py   ← end-to-end baseline smoke test
-├── run_phase2a_comparison.py      ← Phase 2a sparse index comparison
-├── run_phase2a_full_comparison.py ← Phase 2a full scope comparison
-└── results/               ← stored evaluation outputs
+evaluation/
+├── datasets/                       ← labeled question sets per scope
+├── retrieval_metrics.py            ← nDCG, MRR, P@k, R@k computation
+├── phase1a_runner.py               ← Phase 1a evaluation runner
+├── phase1b_baseline.py             ← Phase 1b dense-only baseline
+├── e2e_baseline_test.py            ← end-to-end baseline smoke test
+├── run_phase2a_comparison.py       ← Phase 2a sparse index comparison
+├── run_phase2a_full_comparison.py  ← Phase 2a full scope comparison
+├── w1_promotion_gate.py            ← W1 markdown-aware promotion gate
+├── w1_real_pilot_gate.py           ← W1 real pilot scope gate
+├── w3a_expansion_comparison.py     ← W3a query expansion evaluation
+└── results/                        ← stored evaluation outputs
 ```
 
 ### Golden question format
@@ -43,8 +46,8 @@ Each question set consists of:
 ### How evaluation runs
 
 ```bash
-# From knowledge-api/src/evaluation/
-python phase1b_baseline.py --scope acme-corp/api-docs --qdrant-url http://localhost:6333
+# From repo root
+PYTHONPATH=src python evaluation/phase1b_baseline.py --scope acme-corp/api-docs --qdrant-url http://localhost:6333
 ```
 
 Output: per-question scores, aggregate nDCG/MRR/P@k/R@k, comparison delta if baseline file provided.
@@ -143,6 +146,76 @@ Real production documents from `ai-agentopia/docs` repo. 9 documents loaded (cor
 - Synthetic benchmark: complete, positive signal (nDCG@5 +0.4095)
 - Real pilot-scope gate: **PASSED** (nDCG@5 +0.0477)
 - W1 is safe for opt-in on documentation-heavy scopes. Default remains `fixed_size`.
+
+---
+
+## W3a Evidence — Query Expansion
+
+**Script / artifact in repo:** `evaluation/w3a_expansion_comparison.py`, `evaluation/results/w3a_expansion_comparison.json`
+
+### Evidence 1: Simulated benchmark
+
+Manual/simulated alternative phrasings on `joblogic-kb/api-docs` showed positive directional signal:
+
+| Metric | Baseline | Expanded | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.7917 | 0.8568 | +0.0652 |
+| MRR | 0.7667 | 0.8250 | +0.0583 |
+
+**Status:** Complete. Useful mechanism check only — not production acceptance evidence.
+
+### Evidence 2: Live evaluation + bounded model sweep
+
+Live LLM evaluation on the real pilot corpus did **not** clear the retrieval-mode gate (`nDCG@5` must improve by `>= +0.02`):
+
+| Expansion model | nDCG@5 delta vs baseline | Result |
+|---|---|---|
+| `openai/gpt-4o-mini` | -0.0050 | Fail |
+| `openai/gpt-4.1-mini` | +0.0050 | Fail |
+
+**Current W3a status:** Implemented, default-off, **not approved** for production rollout on the current corpus. The code remains dormant and per-scope gated for future reconsideration only.
+
+---
+
+## W3b Evidence — HyDE
+
+**Results:** `evaluation/results/w3b_hyde_live_eval.json`
+
+Live HyDE evaluation on `joblogic-kb/api-docs`:
+
+| Metric | Baseline | HyDE | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.9201 | 0.9175 | -0.0026 |
+| MRR | 0.9000 | 0.9000 | +0.0000 |
+| Avg latency | 577ms | 3313ms | +2736ms |
+
+**Gate result:** Fail. HyDE did not improve `nDCG@5` and materially increased latency.
+
+**Current W3b status:** Implemented, default-off, **not approved** for production rollout on the current corpus. Future reconsideration requires a different corpus/evidence set, not a silent enablement.
+
+---
+
+## W4 Evidence — LLM Listwise Reranking
+
+**Results:** `evaluation/results/w4_reranking_live_eval.json`
+
+Live reranking evaluation on `joblogic-kb/api-docs` (18 chunks, 258 Qdrant points at eval time):
+
+| Metric | Baseline | Reranked | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.5262 | 0.4024 | -0.1238 |
+| MRR | 0.5000 | 0.3333 | -0.1667 |
+| Avg rerank latency | — | 908ms | — |
+
+**Mechanism:** LLM listwise reranking — K=20 candidates retrieved from Qdrant, all sent to `openai/gpt-4o-mini` in one call for relevance ranking, top-5 returned from reranked order.
+
+**Cost:** ~$0.0009/query at gpt-4o-mini pricing (K=20 × ~300 chars ≈ 6000 input tokens + ~50 output tokens).
+
+**Gate result:** Fail. The reranker actively regressed retrieval quality (−0.1238 nDCG@5). gpt-4o-mini consistently misranked domain-specific documents (e.g., promoted `production-super-rag.md` over `chatbot-architecture.md` for queries about monitoring and bot authentication).
+
+**Note:** Baseline nDCG@5 differs from W3a/W3b baseline (0.9201) because the corpus expanded — new documents ingested between evaluations. The lower baseline (0.5262) would normally make improvement *easier* to demonstrate, making the reranker regression result even more negative.
+
+**Current W4 status:** Implemented, default-off, **not approved** for production rollout on the current corpus with the current model. Future reconsideration requires: a domain-tuned cross-encoder (e.g., Cohere Rerank) or a different corpus where generic LLM ranking adds signal rather than noise.
 
 ---
 
