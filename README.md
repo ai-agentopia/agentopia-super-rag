@@ -178,7 +178,7 @@ podman run -d --pod agentopia-local --name agentopia-rag \
   agentopia-super-rag:local
 ```
 
-Within a pod all containers share the same network namespace, so `QDRANT_URL=http://localhost:6333` and `POSTGRES_DSN=postgresql://...@localhost:5432/agentopia` work correctly on both Linux and macOS.
+Within a pod all containers share the same network namespace, so `QDRANT_URL=http://localhost:6333` and `DATABASE_URL=postgresql://...@localhost:5432/agentopia` work correctly on both Linux and macOS.
 
 Smoke checks after startup:
 ```bash

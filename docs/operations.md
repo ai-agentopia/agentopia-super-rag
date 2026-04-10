@@ -8,20 +8,19 @@ All configuration is injected via environment variables. No config file is read 
 
 | Variable | Description |
 |---|---|
-| `QDRANT_URL` | Qdrant service URL (e.g. `http://qdrant.agentopia-dev.svc.cluster.local:6333`) |
-| `POSTGRES_DSN` | PostgreSQL connection string |
-| `EMBEDDING_API_URL` | Embedding API base URL (e.g. `https://openrouter.ai/api/v1/embeddings`) |
-| `EMBEDDING_API_KEY` | API key for embedding service |
+| `QDRANT_URL` | Qdrant service URL (e.g. `http://qdrant.agentopia-dev.svc.cluster.local:6333`). Unset → in-memory vector fallback (no persistence). |
+| `DATABASE_URL` | PostgreSQL connection string (e.g. `postgresql://user:pass@host:5432/agentopia`). Unset → `InMemoryDocumentStore` (no document lifecycle persistence). |
+| `EMBEDDING_API_KEY` | API key for OpenRouter (embedding and LLM calls) |
 | `KNOWLEDGE_API_INTERNAL_TOKEN` | Shared secret for `X-Internal-Token` auth (bot-config-api → knowledge-api) |
-| `K8S_NAMESPACE` | K8s namespace to read ArgoCD Application CRDs from |
+| `K8S_NAMESPACE` | K8s namespace to read ArgoCD Application CRDs from (binding cache) |
 
 ### Optional
 
 | Variable | Default | Description |
 |---|---|---|
-| `EMBEDDING_MODEL` | `openrouter/openai/text-embedding-3-small` | Embedding model name (must include provider prefix for llm-proxy) |
-| `EMBEDDING_BASE_URL` | (derived from `EMBEDDING_API_URL`) | Override base URL if different from embedding URL |
-| `BINDING_RECONCILE_INTERVAL_SECONDS` | `300` | How often to reconcile K8s binding cache |
+| `EMBEDDING_BASE_URL` | `https://openrouter.ai/api/v1/embeddings` | OpenRouter API base URL. Used for embedding calls and (when `LLM_PROXY_URL` unset) for W3a/W3b/W4 LLM calls. |
+| `EMBEDDING_MODEL` | `openai/text-embedding-3-small` | Embedding model name. In production via agentopia-llm-proxy/OpenRouter, must include provider prefix: `openrouter/openai/text-embedding-3-small`. |
+| `BINDING_RECONCILE_INTERVAL_SECS` | `300` | How often to reconcile K8s binding cache (seconds) |
 | `LOG_LEVEL` | `INFO` | Structured log level |
 | `LOG_FORMAT` | `text` | Set to `json` for structured JSON log output |
 | `PORT` | `8002` | Container port for uvicorn |
@@ -145,7 +144,7 @@ After a deployment, an operator can verify the service is functioning without ri
 
 ```bash
 # 1. Shallow health
-curl -s https://dev.agentopia.vn/api/v1/knowledge/health  # or via internal ingress
+curl -s https://dev.agentopia.vn/health  # or via internal ingress
 
 # 2. List scopes (uses internal token)
 curl -s -H "X-Internal-Token: $KNOWLEDGE_API_INTERNAL_TOKEN" \

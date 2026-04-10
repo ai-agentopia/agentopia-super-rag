@@ -88,7 +88,7 @@ document input (PDF / HTML / Markdown / code)
     ├── chunk     (fixed-size 512 tokens / 50 overlap, or paragraph, or code-aware)
     │             Strategy is per-ingest configurable. Default: fixed-size.
     │
-    ├── embed     (POST to EMBEDDING_API_URL, model: text-embedding-3-small, 1536d)
+    ├── embed     (POST to EMBEDDING_BASE_URL, model: text-embedding-3-small, 1536d)
     │             Circuit breaker: 5 consecutive failures → open for 300s (5 min)
     │
     ├── upsert    → Qdrant collection (kb-{sha256_hex[:16]} of scope identity)
