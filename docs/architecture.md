@@ -45,7 +45,7 @@ It does not make workflow decisions, does not call LLMs for reasoning, and does 
 ### agentopia-infra
 
 - Deployment manifests live in `agentopia-infra/charts/agentopia-base/`. The service is deployed as part of the base platform Helm chart, not as a standalone ArgoCD Application.
-- Image tag is tracked by ArgoCD Image Updater (pattern: `dev-{sha}` on `dev` image builds).
+- Image tag is tracked by ArgoCD Image Updater (pattern: `dev-{sha}` — tag format, produced on push to `main`).
 
 ### agentopia-graph-executor
 
