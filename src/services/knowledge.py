@@ -80,20 +80,31 @@ def chunk_document(
     use_section_paths = config.chunking_strategy == ChunkingStrategy.MARKDOWN_AWARE
     heading_stack: list[tuple[int, str]] = []  # (level, heading_text)
 
+    # Track the active section name and path for continuation chunks
+    active_section = ""
+    active_section_path = ""
+
     chunks = []
     for i, text in enumerate(texts):
         if not text.strip():
             continue
         section = _extract_section(text)
         section_path = ""
-        if use_section_paths and section:
-            # Find heading level from the chunk text
-            level = _extract_heading_level(text)
-            if level > 0:
-                while heading_stack and heading_stack[-1][0] >= level:
-                    heading_stack.pop()
-                heading_stack.append((level, section))
-                section_path = " > ".join(h for _, h in heading_stack)
+        if use_section_paths:
+            if section:
+                # Chunk starts with a heading — update the stack
+                level = _extract_heading_level(text)
+                if level > 0:
+                    while heading_stack and heading_stack[-1][0] >= level:
+                        heading_stack.pop()
+                    heading_stack.append((level, section))
+                    section_path = " > ".join(h for _, h in heading_stack)
+                active_section = section
+                active_section_path = section_path
+            else:
+                # Continuation chunk (no heading) — inherit from active section
+                section = active_section
+                section_path = active_section_path
         chunks.append(
             DocumentChunk(
                 text=text,
