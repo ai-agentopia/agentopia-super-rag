@@ -54,7 +54,7 @@ def expand_query(
     """
     n = min(n, MAX_EXPANSION_COUNT)
     if not api_key:
-        api_key = os.getenv("OPENROUTER_API_KEY", "")
+        api_key = os.getenv("EMBEDDING_API_KEY", "") or os.getenv("OPENROUTER_API_KEY", "")
     if not api_key:
         logger.warning("Query expansion: no API key configured, skipping")
         return []

@@ -1054,7 +1054,10 @@ class QdrantBackend:
         self._embedding_model = os.getenv("EMBEDDING_MODEL", "openai/text-embedding-3-small")
         self._embedding_base_url = os.getenv("EMBEDDING_BASE_URL", "https://openrouter.ai/api/v1/embeddings")
         self._embedding_timeout = int(os.getenv("EMBEDDING_TIMEOUT_SECONDS", "30"))
-        self._embedding_api_key = os.getenv("OPENROUTER_API_KEY", "")
+        self._embedding_api_key = (
+            os.getenv("EMBEDDING_API_KEY", "")
+            or os.getenv("OPENROUTER_API_KEY", "")
+        )
 
         # Hybrid retrieval config (#319, frozen)
         self._hybrid_enabled = os.getenv("HYBRID_SEARCH_ENABLED", "false").lower() == "true"
