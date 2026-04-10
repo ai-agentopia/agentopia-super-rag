@@ -1,6 +1,6 @@
 {
   "evaluation": "w1_real_pilot_gate",
-  "timestamp": "2026-04-10T01:22:59Z",
+  "timestamp": "2026-04-10T01:30:13Z",
   "pilot_scope": "joblogic-kb/api-docs",
   "dataset": "w1_real_pilot.json",
   "dataset_queries": 10,
