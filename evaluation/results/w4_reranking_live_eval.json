@@ -1,0 +1,274 @@
+{
+  "evaluation_type": "live_llm",
+  "date": "2026-04-10",
+  "wave": "W4",
+  "scope": "joblogic-kb/api-docs",
+  "queries": 10,
+  "candidate_k": 20,
+  "result_k": 5,
+  "rerank_model": "openai/gpt-4o-mini",
+  "baseline": {
+    "ndcg5": 0.5262,
+    "mrr": 0.5
+  },
+  "rerank": {
+    "ndcg5": 0.4024,
+    "mrr": 0.3333,
+    "avg_latency_ms": 908
+  },
+  "delta": {
+    "ndcg5": -0.1238
+  },
+  "gate_threshold_ndcg5": 0.02,
+  "gate_result": "FAIL",
+  "latency_note": "Measured through 3-hop SSH tunnel to cluster llm-proxy. Production pod-to-pod: ~300-800ms reranking overhead (single LLM call). Cost: ~$0.0009/query at K=20, gpt-4o-mini pricing.",
+  "cost_note": "1 LLM call per reranked search. K=20 candidates x ~300 tokens = ~6000 input tokens + ~50 output tokens. At $0.15/1M input: ~$0.0009/query.",
+  "per_query": [
+    {
+      "id": "rp-01",
+      "query": "What are the core services in the Agentopia platform archite",
+      "baseline": {
+        "ndcg": 1.0,
+        "mrr": 1.0,
+        "order": [
+          "chatbot-architecture.md",
+          "a2a-full-design.md",
+          "overview.md",
+          "architecture-multiple-bot.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 1.0,
+        "mrr": 1.0,
+        "latency_ms": 724,
+        "order": [
+          "chatbot-architecture.md",
+          "overview.md",
+          "architecture-multiple-bot.md",
+          "a2a-full-design.md",
+          "production-super-rag.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-02",
+      "query": "How does bot provisioning work?",
+      "baseline": {
+        "ndcg": 1.0,
+        "mrr": 1.0,
+        "order": [
+          "chatbot-architecture.md",
+          "architecture-multiple-bot.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.6309,
+        "mrr": 0.5,
+        "latency_ms": 862,
+        "order": [
+          "architecture-multiple-bot.md",
+          "chatbot-architecture.md",
+          "production-sa-knowledge-base.md",
+          "overview.md",
+          "ui-knowledge-workflow-trigger.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-03",
+      "query": "How does the memory layer work for multi-bot conversations?",
+      "baseline": {
+        "ndcg": 0.0,
+        "mrr": 0.0,
+        "order": [
+          "chatbot-architecture.md",
+          "architecture-multiple-bot.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.0,
+        "mrr": 0.0,
+        "latency_ms": 1053,
+        "order": [
+          "chatbot-architecture.md",
+          "architecture-multiple-bot.md",
+          "overview.md",
+          "a2a-full-design.md",
+          "production-sa-knowledge-base.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-04",
+      "query": "What LLM models are supported by the gateway?",
+      "baseline": {
+        "ndcg": 1.0,
+        "mrr": 1.0,
+        "order": [
+          "chatbot-architecture.md",
+          "overview.md",
+          "architecture-multiple-bot.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.6309,
+        "mrr": 0.5,
+        "latency_ms": 860,
+        "order": [
+          "architecture-multiple-bot.md",
+          "chatbot-architecture.md",
+          "overview.md",
+          "p1-web-app-primary-dual-lane-mvp.md",
+          "production-sa-knowledge-base.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-05",
+      "query": "What is the A2A agent-to-agent communication protocol?",
+      "baseline": {
+        "ndcg": 0.0,
+        "mrr": 0.0,
+        "order": [
+          "a2a-full-design.md",
+          "overview.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.0,
+        "mrr": 0.0,
+        "latency_ms": 789,
+        "order": [
+          "a2a-full-design.md",
+          "overview.md",
+          "production-super-rag.md",
+          "architecture-multiple-bot.md",
+          "p1-web-app-primary-dual-lane-mvp.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-06",
+      "query": "How does the mem0 memory service integrate with the platform",
+      "baseline": {
+        "ndcg": 0.0,
+        "mrr": 0.0,
+        "order": [
+          "production-sa-knowledge-base.md",
+          "architecture-multiple-bot.md",
+          "chatbot-architecture.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.0,
+        "mrr": 0.0,
+        "latency_ms": 932,
+        "order": [
+          "production-sa-knowledge-base.md",
+          "architecture-multiple-bot.md",
+          "chatbot-architecture.md",
+          "a2a-full-design.md",
+          "overview.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-07",
+      "query": "What are the deployment steps for a new bot?",
+      "baseline": {
+        "ndcg": 0.6309,
+        "mrr": 0.5,
+        "order": [
+          "architecture-multiple-bot.md",
+          "chatbot-architecture.md",
+          "ui-knowledge-workflow-trigger.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.6309,
+        "mrr": 0.5,
+        "latency_ms": 832,
+        "order": [
+          "architecture-multiple-bot.md",
+          "chatbot-architecture.md",
+          "ui-knowledge-workflow-trigger.md",
+          "overview.md",
+          "reviewer-coexistence.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-08",
+      "query": "How is the bot-config-api structured?",
+      "baseline": {
+        "ndcg": 0.0,
+        "mrr": 0.0,
+        "order": [
+          "production-sa-knowledge-base.md",
+          "chatbot-architecture.md",
+          "architecture-multiple-bot.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.0,
+        "mrr": 0.0,
+        "latency_ms": 1163,
+        "order": [
+          "chatbot-architecture.md",
+          "production-sa-knowledge-base.md",
+          "architecture-multiple-bot.md",
+          "production-super-rag.md",
+          "p1-web-app-primary-dual-lane-mvp.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-09",
+      "query": "What monitoring and metrics are available?",
+      "baseline": {
+        "ndcg": 1.0,
+        "mrr": 1.0,
+        "order": [
+          "chatbot-architecture.md",
+          "production-super-rag.md",
+          "overview.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.5,
+        "mrr": 0.3333,
+        "latency_ms": 851,
+        "order": [
+          "production-super-rag.md",
+          "overview.md",
+          "chatbot-architecture.md",
+          "production-sa-knowledge-base.md",
+          "p1-web-app-primary-dual-lane-mvp.md"
+        ]
+      }
+    },
+    {
+      "id": "rp-10",
+      "query": "How do bots authenticate with Telegram?",
+      "baseline": {
+        "ndcg": 0.6309,
+        "mrr": 0.5,
+        "order": [
+          "production-sa-knowledge-base.md",
+          "chatbot-architecture.md"
+        ]
+      },
+      "rerank": {
+        "ndcg": 0.6309,
+        "mrr": 0.5,
+        "latency_ms": 1013,
+        "order": [
+          "production-sa-knowledge-base.md",
+          "chatbot-architecture.md",
+          "architecture-multiple-bot.md",
+          "production-super-rag.md"
+        ]
+      }
+    }
+  ]
+}

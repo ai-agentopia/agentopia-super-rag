@@ -549,6 +549,14 @@ class KnowledgeService:
         if _env_hyde:
             self._hyde_allowed_scopes = {s.strip() for s in _env_hyde.split(",") if s.strip()}
 
+        # W4: per-scope reranking allowlist. Only scopes in this set may use
+        # LLM listwise reranking. Populated from RERANK_SCOPES env var
+        # (comma-separated) or via enable_reranking() method.
+        self._reranking_allowed_scopes: set[str] = set()
+        _env_rerank = os.getenv("RERANK_SCOPES", "")
+        if _env_rerank:
+            self._reranking_allowed_scopes = {s.strip() for s in _env_rerank.split(",") if s.strip()}
+
     def enable_query_expansion(self, scope: str) -> None:
         """Enable query expansion for a specific scope (W3a #16)."""
         self._expansion_allowed_scopes.add(scope)
@@ -576,6 +584,20 @@ class KnowledgeService:
     def is_hyde_allowed(self, scopes: list[str]) -> bool:
         """Check if HyDE is allowed for any of the given scopes."""
         return any(s in self._hyde_allowed_scopes for s in scopes)
+
+    def enable_reranking(self, scope: str) -> None:
+        """Enable LLM listwise reranking for a specific scope (W4 #18)."""
+        self._reranking_allowed_scopes.add(scope)
+        logger.info("W4: reranking enabled for scope '%s'", scope)
+
+    def disable_reranking(self, scope: str) -> None:
+        """Disable LLM listwise reranking for a specific scope (W4 #18)."""
+        self._reranking_allowed_scopes.discard(scope)
+        logger.info("W4: reranking disabled for scope '%s'", scope)
+
+    def is_reranking_allowed(self, scopes: list[str]) -> bool:
+        """Check if reranking is allowed for any of the given scopes."""
+        return any(s in self._reranking_allowed_scopes for s in scopes)
 
     def ingest(
         self,
@@ -733,6 +755,8 @@ class KnowledgeService:
         query_expansion_enabled: bool = False,
         query_expansion_n: int = 3,
         hyde_enabled: bool = False,
+        rerank_enabled: bool = False,
+        rerank_candidate_k: int = 0,
     ) -> list[SearchResult]:
         """Search across knowledge scopes.
 
@@ -753,9 +777,21 @@ class KnowledgeService:
         4. On LLM failure, fall back silently to dense-only search
         Per-scope allowlist enforced — hyde_enabled=True ignored for non-allowed scopes.
         W3a and W3b are independent; enabling both is not supported without combined eval.
+
+        When rerank_enabled=True (W4 #18):
+        1. Retrieve candidate_k candidates from Qdrant (candidate_k > limit)
+        2. Rerank via LLM listwise scoring (single LLM call for all candidates)
+        3. Return top-limit from reranked order
+        4. On LLM failure, fall back silently to vector-ranked order
+        Per-scope allowlist enforced. Cannot be combined with W3a or W3b without
+        a combined evaluation run.
         """
         if query_expansion_enabled and hyde_enabled:
             raise ValueError("query_expansion and hyde cannot both be enabled")
+        if rerank_enabled and query_expansion_enabled:
+            raise ValueError("rerank and query_expansion cannot both be enabled")
+        if rerank_enabled and hyde_enabled:
+            raise ValueError("rerank and hyde cannot both be enabled")
 
         # Qdrant path: fan-out across scopes, merge, sort, limit
         if self._qdrant:
@@ -816,6 +852,46 @@ class KnowledgeService:
                         "W3b: HyDE applied to %s, dense-only for %s",
                         hyde_allowed, hyde_blocked,
                     )
+
+                final = self._merge_ranked_search_results(ranked_lists, limit)
+                self._audit_search_results(final)
+                return final
+
+            if rerank_enabled:
+                # W4: dense retrieve candidate_k, rerank, return top-limit
+                rerank_allowed = [s for s in scopes if s in self._reranking_allowed_scopes]
+                rerank_blocked = [s for s in scopes if s not in self._reranking_allowed_scopes]
+
+                if rerank_allowed:
+                    from services.reranker import DEFAULT_CANDIDATE_K
+                    candidate_k = rerank_candidate_k or DEFAULT_CANDIDATE_K
+                    # Retrieve more candidates than needed for reranking
+                    candidates = self._search_dense_across_scopes(
+                        query, rerank_allowed, max(candidate_k, limit), min_score
+                    )
+                    reranked_results = self._rerank_search_results(query, candidates, limit)
+                else:
+                    reranked_results = []
+
+                # Dense-only for blocked scopes
+                dense_results = (
+                    self._search_dense_across_scopes(query, rerank_blocked, limit, min_score)
+                    if rerank_blocked
+                    else []
+                )
+
+                if rerank_blocked:
+                    logger.info(
+                        "W4: reranking applied to %s, dense-only for %s",
+                        rerank_allowed, rerank_blocked,
+                    )
+
+                # Merge allowed (reranked) and blocked (dense) via RRF
+                ranked_lists: list[list[SearchResult]] = []
+                if reranked_results:
+                    ranked_lists.append(reranked_results)
+                if dense_results:
+                    ranked_lists.append(dense_results)
 
                 final = self._merge_ranked_search_results(ranked_lists, limit)
                 self._audit_search_results(final)
@@ -1127,6 +1203,32 @@ class KnowledgeService:
             total_ms, hypothesis_ms, total_ms - hypothesis_ms, len(final),
         )
         self._audit_search_results(final)
+        return final
+
+    def _rerank_search_results(
+        self,
+        query: str,
+        candidates: list[SearchResult],
+        limit: int,
+    ) -> list[SearchResult]:
+        """Rerank candidate SearchResults via LLM listwise scoring (W4 #18).
+
+        Converts SearchResult → dicts for reranker, calls rerank_results(),
+        converts back. Returns top-limit from reranked order.
+        On LLM failure, returns top-limit from vector-ranked order.
+        """
+        from services.reranker import rerank_results
+
+        t0 = time.monotonic()
+        candidate_dicts = self._search_results_to_ranked_dicts(candidates)
+        reranked_dicts = rerank_results(query, candidate_dicts)
+        elapsed_ms = (time.monotonic() - t0) * 1000
+
+        final = self._ranked_dicts_to_search_results(reranked_dicts[:limit])
+        logger.info(
+            "W4: rerank complete in %.0fms (candidates=%d, returned=%d)",
+            elapsed_ms, len(candidates), len(final),
+        )
         return final
 
     @staticmethod

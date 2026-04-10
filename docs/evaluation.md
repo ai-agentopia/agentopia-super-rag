@@ -192,6 +192,30 @@ Live HyDE evaluation on `joblogic-kb/api-docs`:
 
 ---
 
+## W4 Evidence — LLM Listwise Reranking
+
+**Results:** `evaluation/results/w4_reranking_live_eval.json`
+
+Live reranking evaluation on `joblogic-kb/api-docs` (18 chunks, 258 Qdrant points at eval time):
+
+| Metric | Baseline | Reranked | Delta |
+|---|---|---|---|
+| nDCG@5 | 0.5262 | 0.4024 | -0.1238 |
+| MRR | 0.5000 | 0.3333 | -0.1667 |
+| Avg rerank latency | — | 908ms | — |
+
+**Mechanism:** LLM listwise reranking — K=20 candidates retrieved from Qdrant, all sent to `openai/gpt-4o-mini` in one call for relevance ranking, top-5 returned from reranked order.
+
+**Cost:** ~$0.0009/query at gpt-4o-mini pricing (K=20 × ~300 chars ≈ 6000 input tokens + ~50 output tokens).
+
+**Gate result:** Fail. The reranker actively regressed retrieval quality (−0.1238 nDCG@5). gpt-4o-mini consistently misranked domain-specific documents (e.g., promoted `production-super-rag.md` over `chatbot-architecture.md` for queries about monitoring and bot authentication).
+
+**Note:** Baseline nDCG@5 differs from W3a/W3b baseline (0.9201) because the corpus expanded — new documents ingested between evaluations. The lower baseline (0.5262) would normally make improvement *easier* to demonstrate, making the reranker regression result even more negative.
+
+**Current W4 status:** Implemented, default-off, **not approved** for production rollout on the current corpus with the current model. Future reconsideration requires: a domain-tuned cross-encoder (e.g., Cohere Rerank) or a different corpus where generic LLM ranking adds signal rather than noise.
+
+---
+
 ## What Is Not Evaluated Here
 
 - Reasoning quality (planner, reviewer-shadow) — owned by `agentopia-graph-executor`
