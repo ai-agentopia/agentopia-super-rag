@@ -117,8 +117,8 @@ Synthetic corpus with markdown-structured documents (headings, sections). Demons
 
 Real production documents from `ai-agentopia/docs` repo. 9 documents loaded (corpus explicitly defined — `ui-knowledge-workflow-trigger.md` excluded as it was ingested directly, not from the docs repo, and no labeled queries reference it).
 
-**Corpus:** 9 markdown documents, 244 chunks (fixed-size) / 348 chunks (markdown-aware after remediation).
-**Labels:** REVIEWED — each query-source mapping verified against document heading structure. CTO sign-off on labels assumed.
+**Corpus:** 9 markdown documents, 244 chunks (fixed-size) / 349 chunks (markdown-aware after remediation).
+**Labels:** REVIEWED — each query-source mapping verified against document heading structure. CTO sign-off complete.
 **Metric model:** nDCG@5 and MRR are authoritative. P@5 is directional. Recall@5 excluded (invalid with source-level grading).
 
 | Metric | FIXED_SIZE (244 chunks) | MARKDOWN_AWARE (348 chunks) | Delta |

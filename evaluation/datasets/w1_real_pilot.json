@@ -10,7 +10,7 @@
   "pilot_scope": "joblogic-kb/api-docs",
   "pilot_corpus": "9 documents from ai-agentopia/docs repo. ui-knowledge-workflow-trigger.md excluded — not in docs repo (ingested directly, not from canonical source).",
   "label_strategy": "source-level: relevance grade assigned per source document. All chunks from a grade-2 source receive grade 2; grade-1 source → grade 1; unlabeled sources → grade 0.",
-  "labeling_status": "REVIEWED — labels verified against document heading structure. Each query-source mapping confirmed by checking the document's heading/section that answers the query. Awaiting CTO sign-off for authoritative status.",
+  "labeling_status": "APPROVED — labels verified against document heading structure and CTO sign-off complete.",
   "metric_model": "nDCG@5 and MRR are authoritative. Precision@5 is directional. Recall@5 is NOT reported (source-level grading makes it invalid — denominator is source count, numerator is chunk count).",
   "wave": "W1 real pilot — 10 queries against joblogic-kb/api-docs (9 docs)",
   "samples": [

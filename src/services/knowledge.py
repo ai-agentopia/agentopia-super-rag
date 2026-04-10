@@ -252,36 +252,61 @@ def _chunk_markdown_aware(content: str, max_size: int) -> list[str]:
         if not block_text:
             continue
 
-        # Strong boundary: heading_section always starts a new chunk
+        # Strong boundary: heading_section always starts a new chunk.
+        # Invariant: the heading line is NEVER emitted as a standalone
+        # chunk — it must always be attached to body content.
         if block_type == "heading_section":
             if current:
                 chunks.append(current)
             if len(block_text) > max_size:
-                sub_chunks = _split_oversized_block(block_text, max_size)
-                chunks.extend(sub_chunks[:-1])
-                current = sub_chunks[-1] if sub_chunks else ""
+                # Oversized heading section. Extract the heading line and
+                # split the body, keeping the heading attached to the
+                # first body sub-chunk.
+                first_nl = block_text.find("\n")
+                if first_nl > 0:
+                    heading_line = block_text[:first_nl]
+                    body = block_text[first_nl + 1:].lstrip("\n")
+                    heading_prefix = heading_line + "\n"
+                    body_budget = max(max_size - len(heading_prefix), 1)
+                    body_sub = _split_oversized_block(body, body_budget)
+                    if body_sub:
+                        body_sub[0] = heading_prefix + body_sub[0]
+                    else:
+                        body_sub = [heading_prefix.strip()]
+                    chunks.extend(body_sub[:-1])
+                    current = body_sub[-1] if body_sub else ""
+                else:
+                    # Single-line heading that exceeds max_size — hard-split
+                    sub_chunks = _split_oversized_block(block_text, max_size)
+                    chunks.extend(sub_chunks[:-1])
+                    current = sub_chunks[-1] if sub_chunks else ""
                 current_is_heading_only = False
             else:
                 current = block_text
-                # A heading_section that is ONLY the heading line (no body
-                # content after it) must absorb the next block to avoid
-                # emitting a tiny standalone heading chunk.
                 current_is_heading_only = "\n" not in block_text.strip()
             continue
 
         # If current is a heading-only stub, force-attach this block as
-        # its body content — even if it exceeds max_size. Split the
-        # combined text if needed, but never leave the heading alone.
+        # its body content — even if it exceeds max_size. The heading
+        # must remain attached to the first content chunk, never standalone.
         if current_is_heading_only:
             combined = f"{current}\n\n{block_text}"
             if len(combined) <= max_size:
                 current = combined
             else:
-                # Heading + content exceeds max_size. Split the content
-                # but keep the heading attached to the first sub-chunk.
-                sub_chunks = _split_oversized_block(combined, max_size)
-                chunks.extend(sub_chunks[:-1])
-                current = sub_chunks[-1] if sub_chunks else ""
+                # Split the BODY only, then prepend the heading to the
+                # first body sub-chunk. This guarantees the heading is
+                # never emitted alone, even when the body is a single
+                # line longer than max_size.
+                heading_prefix = current + "\n\n"
+                body_budget = max(max_size - len(heading_prefix), 1)
+                body_sub = _split_oversized_block(block_text, body_budget)
+                if body_sub:
+                    body_sub[0] = heading_prefix + body_sub[0]
+                else:
+                    body_sub = [heading_prefix.strip()]
+                chunks.extend(body_sub[:-1])
+                current = body_sub[-1] if body_sub else ""
             current_is_heading_only = False
             continue
 
