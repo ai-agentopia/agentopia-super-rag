@@ -121,7 +121,7 @@ Real production documents from `ai-agentopia/docs` repo. 9 documents loaded (cor
 **Labels:** REVIEWED — each query-source mapping verified against document heading structure. CTO sign-off complete.
 **Metric model:** nDCG@5 and MRR are authoritative. P@5 is directional. Recall@5 excluded (invalid with source-level grading).
 
-| Metric | FIXED_SIZE (244 chunks) | MARKDOWN_AWARE (348 chunks) | Delta |
+| Metric | FIXED_SIZE (244 chunks) | MARKDOWN_AWARE (349 chunks) | Delta |
 |---|---|---|---|
 | nDCG@5 | 0.7440 | **0.7917** | **+0.0477** |
 | MRR | 0.7500 | **0.7667** | +0.0167 |
@@ -129,7 +129,7 @@ Real production documents from `ai-agentopia/docs` repo. 9 documents loaded (cor
 
 **Gate result: PASSED** — nDCG@5 improved by 0.0477 (no regression).
 
-**Remediation applied:** Original W1 implementation produced 388 chunks (82 under 100 chars) causing score dilution. Remediation: (1) filter horizontal-rule-only blocks (`---`), (2) force-attach heading-only blocks to following content block — headings are never emitted as standalone chunks. Post-remediation: 348 chunks, 42 under 100 chars.
+**Remediation applied:** Original W1 implementation produced 388 chunks (82 under 100 chars) causing score dilution. Remediation: (1) filter horizontal-rule-only blocks (`---`), (2) force-attach heading-only blocks to following content block — headings are never emitted as standalone chunks. Post-remediation: 349 chunks, 42 under 100 chars.
 
 **Remaining limitation:** In-memory cosine search, not production Qdrant embedding search.
 

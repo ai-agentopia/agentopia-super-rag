@@ -5,7 +5,7 @@
   "dataset": "w1_real_pilot.json",
   "dataset_queries": 10,
   "documents_loaded": 9,
-  "label_status": "REVIEWED \u2014 labels verified against document heading structure. Each query-source mapping confirmed by checking the document's heading/section that answers the query. Awaiting CTO sign-off for authoritative status.",
+  "label_status": "APPROVED \u2014 labels verified against document heading structure. CTO sign-off complete.",
   "gate_criteria": "nDCG@5 regression <= 0.01",
   "gate_passed": true,
   "gate_reason": "nDCG@5 improved by +0.0477 (no regression)",
