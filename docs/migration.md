@@ -33,7 +33,7 @@ This document is a historical record of the extraction. It is not a guide to any
 
 Atomic cutover executed per the single-publisher rule:
 
-1. `.github/workflows/build-image.yml` push trigger enabled on `dev` and `main` in this repo
+1. `.github/workflows/build-image.yml` push trigger enabled on `main` in this repo (main-only repo — no dev/uat branches)
 2. `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}` first published from this repo
 3. `agentopia-infra` ArgoCD Image Updater annotation updated to track this repo's tags
 4. `agentopia-protocol` CI image push step disabled (`agentopia-protocol#389`)

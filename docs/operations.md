@@ -82,7 +82,7 @@ This endpoint requires `X-Internal-Token`.
 
 ## Deployment Flow
 
-1. Push to `dev` or `main` branch in `agentopia-super-rag` (this repo)
+1. Push to `main` branch in `agentopia-super-rag` (this repo — main-only, no dev/uat branches)
 2. GitHub Actions: fast test gate → Docker build → push `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}`
 3. ArgoCD Image Updater detects new `dev-{sha}` tag → updates Helm values in `agentopia-infra`
 4. ArgoCD reconciles `agentopia-base` app → rolling deployment in `agentopia-dev`

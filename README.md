@@ -88,15 +88,15 @@ PYTHONPATH=src python -m pytest tests/ -m "not integration and not e2e" -x -q
 PYTHONPATH=src python -m pytest tests/ -m "integration" -x -q
 ```
 
-> **Known local env limitation:** `python-multipart` is required by FastAPI for the file upload endpoint (`POST /{scope}/ingest`). Without it, `TestClient`-based API tests fail at import. Install with `pip install python-multipart` to run the full test suite. Service startup and all non-API-layer tests are unaffected.
+> **`python-multipart` is required.** FastAPI enforces this at route-registration time. Without it, `from main import app` raises `RuntimeError` and `uvicorn main:app` will not start. Install with `pip install python-multipart`. Tests that do not import the full app (service-layer and model tests) still run without it, but any test or tool that imports the FastAPI app will fail.
 
 ---
 
 ## CI/CD Overview
 
-- CI runs on push to `dev` and `main`: fast gate (`.github/workflows/ci.yml`) + Docker build
-- CI pushes `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}` from this repo
-- ArgoCD Image Updater picks up new `dev-{sha}` tags and deploys to `agentopia-dev`
+- **Main-only repo.** CI triggers on push to `main` only (`.github/workflows/ci.yml`, `.github/workflows/build-image.yml`). No `dev` or `uat` branches.
+- Push to `main` → fast gate → Docker build → push `ghcr.io/ai-agentopia/knowledge-api:dev-{sha}` (tag format is `dev-{sha}`, not a branch name)
+- ArgoCD Image Updater picks up new `dev-{sha}` tags and deploys to `agentopia-dev` namespace
 - `agentopia-protocol` no longer builds or pushes the knowledge-api image (retired 2026-04-09)
 
 ---
