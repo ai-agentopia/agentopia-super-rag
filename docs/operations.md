@@ -1,5 +1,13 @@
 # Operations
 
+## Super RAG Integration Boundary
+
+Super RAG's `/ingest` endpoint is called by the Ingest Orchestrator in `agentopia-knowledge-ingest` after normalization and extraction complete. Super RAG does not own upstream document parsing, metadata extraction, or raw document storage.
+
+For the full ingest contract, see [architecture.md](architecture.md#super-rag-integration-boundary).
+
+---
+
 ## Runtime Configuration
 
 All configuration is injected via environment variables. No config file is read at runtime.
