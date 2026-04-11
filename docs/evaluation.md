@@ -226,3 +226,83 @@ Live reranking evaluation on `joblogic-kb/api-docs` (18 chunks, 258 Qdrant point
 - Bot response quality — out of scope for the retrieval layer
 
 Retrieval evaluation answers only: given a query and a corpus, are the right documents returned in the right order?
+
+---
+
+## Runtime Evaluation and Governance
+
+The system includes a runtime evaluation layer that governs document replacements. This is separate from the research evaluation scripts in `evaluation/` — it runs as part of the service on every document replacement.
+
+### Per-Scope Baselines
+
+Every scope has an independently established baseline. No global nDCG threshold applies across all scopes — a scope with structured markdown docs and a scope with mixed PDFs will have different baseline values.
+
+Baselines are stored in the `evaluation_baselines` table (PostgreSQL). They are human-curated (established by running `POST /api/v1/evaluation/baselines/{scope}`) and rarely changed.
+
+### Golden Questions
+
+Golden questions are stored in the `golden_questions` table. Each question has:
+- A natural-language query
+- `expected_sources`: list of `{source, relevance}` where source is the document filename/path and relevance is 0 (not relevant), 1 (partially relevant), or 2 (fully relevant)
+- An optional weight
+
+Manage via:
+```
+GET    /api/v1/evaluation/questions/{scope}   — list questions
+POST   /api/v1/evaluation/questions/{scope}   — add question
+DELETE /api/v1/evaluation/questions/{id}      — remove question
+```
+
+### Regression Gate on Document Replacement
+
+When a document replacement completes (new version reaches `active` state), the evaluation service automatically:
+
+1. Runs all golden questions for the affected scope against live retrieval
+2. Computes nDCG@5, MRR, P@5, R@5
+3. Compares nDCG@5 against the per-scope baseline
+4. Applies the gate:
+
+| Delta (nDCG@5 vs baseline) | Verdict | Action |
+|---|---|---|
+| >= 0 | `passed` | No action; logged at INFO |
+| >= -0.02 and < 0 | `warning` | Document stays active; operator informed via log |
+| < -0.02 | `blocked` | Document stays active (already committed); operator notified; override required |
+
+**Important:** The document is **already active** when the gate fires. The gate is a governance notification, not a pre-commit check. If the verdict is `blocked`, the operator can either:
+- Roll back to the prior version via `POST /api/v1/knowledge/{scope}/documents/{source}` (re-ingest prior version)
+- Accept the regression via `POST /api/v1/evaluation/results/{result_id}/override`
+
+### Operator Notification
+
+Regression blocks are surfaced as:
+- Structured log at WARNING level with fields: scope, document_id, version, ndcg_5, delta, result_id
+- Record in `evaluation_results` table with `verdict = 'blocked'`
+- Visible via `GET /api/v1/evaluation/results?scope={scope}`
+
+### API Endpoints
+
+```
+GET  /api/v1/evaluation/baselines                    — list all baselines
+GET  /api/v1/evaluation/baselines/{scope}            — get baseline for scope
+POST /api/v1/evaluation/baselines/{scope}            — establish/refresh baseline
+GET  /api/v1/evaluation/results?scope={scope}        — evaluation run history
+POST /api/v1/evaluation/results/{result_id}/override — accept regression
+GET  /api/v1/evaluation/questions/{scope}            — list golden questions
+POST /api/v1/evaluation/questions/{scope}            — add golden question
+DELETE /api/v1/evaluation/questions/{id}             — remove golden question
+POST /api/v1/evaluation/run/{scope}                  — manual benchmark trigger
+```
+
+All endpoints require `X-Internal-Token` auth.
+
+### Evaluation Results Table
+
+`evaluation_results` is **append-only** — rows are never deleted. This provides a full quality audit trail across all document replacements for every scope.
+
+Fields: id, scope, document_id, document_version, run_at, trigger, ndcg_5, mrr, p_5, r_5, delta_ndcg_5, verdict, operator_override, operator_note.
+
+### Gate Failure Behavior
+
+- If the evaluation service fails to connect to the database: gate is skipped, document stays active, WARNING logged
+- If golden question search fails: gate is skipped, verdict = `eval_error`, WARNING logged
+- Evaluation failures **never roll back** a completed ingest — the document remains active and the pipeline continues
