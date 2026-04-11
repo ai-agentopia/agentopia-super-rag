@@ -156,6 +156,10 @@ class DocumentRecord(BaseModel):
 
     Persisted in Postgres. One active record per (scope, source).
     Tombstones retained for superseded/deleted.
+
+    metadata: arbitrary JSON for extension fields. Used by the orchestrator
+    ingest path to store {"version": N} so prior-version detection and
+    idempotency checks work without parsing the source string.
     """
 
     id: int = 0
@@ -169,6 +173,7 @@ class DocumentRecord(BaseModel):
     status: DocumentRecordStatus = DocumentRecordStatus.ACTIVE
     superseded_at: float | None = None
     deleted_at: float | None = None
+    metadata: dict = {}  # extension storage; orchestrator path stores {"version": N}
 
 
 class RepoIndexConfig(BaseModel):
