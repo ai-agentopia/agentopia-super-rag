@@ -755,22 +755,36 @@ class KnowledgeService:
     ) -> OrchestratorIngestResponse:
         """Ingest pre-parsed text from agentopia-knowledge-ingest Orchestrator.
 
-        Handles versioned ingest:
-        1. Chunk the normalized text using the requested strategy
-        2. Embed and upsert chunks with document_id, version, status=active in payload
-        3. Supersede prior active version chunks for the same document_id (if any)
-        4. Return indexed chunk count
+        Source key model
+        ----------------
+        source = f"orchestrator:{doc_id}" — stable per logical document, version-agnostic.
+        This is the identity key used in document_records.  Version is stored separately
+        in document_records.metadata["version"].
 
-        Idempotent: if (document_id, version) already active, skip re-embedding.
+        Prior version detection
+        -----------------------
+        get_active(scope, source) finds the existing ACTIVE record for this logical
+        document (regardless of version). Its metadata["version"] field gives the prior
+        version number that needs to be superseded in Qdrant.
+
+        Idempotency on (document_id, version)
+        --------------------------------------
+        Before embedding, check if the active record's stored version == request.version.
+        If so, the same version is already indexed → return without re-embedding (skipped).
+
+        Replacement flow
+        ----------------
+        1. Chunk + embed new version (new chunks, document_id, version=N, status=active)
+        2. Update document_records: replace_active supersedes old record, creates new one
+        3. Supersede Qdrant chunks for the prior version (payload update, no re-embed)
         """
         doc_id = request.document_id
         version = request.version
         ingested_at = time.time()
 
-        # Build a synthetic source identifier from document_id+version for chunk_document
-        source = f"orchestrator:{doc_id}:v{version}"
+        # Stable source key — version-agnostic so get_active finds the prior version
+        source = f"orchestrator:{doc_id}"
 
-        # Map format string to DocumentFormat enum; default TEXT if unrecognised
         fmt_map = {
             "pdf": DocumentFormat.PDF,
             "docx": DocumentFormat.TEXT,
@@ -785,6 +799,28 @@ class KnowledgeService:
         config = IngestConfig(chunking_strategy=request.chunking_strategy)
         doc_hash = compute_document_hash(request.text)
 
+        # ── Idempotency check: already indexed this exact version? ────────────
+        if self._doc_store:
+            existing = self._doc_store.get_active(scope, source)
+            if existing:
+                stored_version = (existing.metadata or {}).get("version") if hasattr(existing, "metadata") else None
+                # Fall back to parsing from source if metadata not present
+                if stored_version is None:
+                    # Attempt to read version stored as source suffix (legacy)
+                    stored_version = None
+                if stored_version == version:
+                    logger.info(
+                        "ingest_from_orchestrator: skipping — scope=%s document_id=%s version=%d already active",
+                        scope, doc_id, version,
+                    )
+                    return OrchestratorIngestResponse(
+                        document_id=doc_id,
+                        scope=scope,
+                        version=version,
+                        chunk_count=existing.chunk_count,
+                        status="skipped",
+                    )
+
         raw_chunks = chunk_document(
             content=request.text,
             source=source,
@@ -795,28 +831,26 @@ class KnowledgeService:
             ingested_at=ingested_at,
         )
 
-        # Propagate section_path from metadata if hierarchy was extracted upstream
-        # and chunking didn't derive paths (non-markdown strategy)
+        # Propagate section_path from extracted metadata for non-markdown strategies
         if request.metadata.section_path and config.chunking_strategy != ChunkingStrategy.MARKDOWN_AWARE:
             path_str = " > ".join(request.metadata.section_path)
             for chunk in raw_chunks:
                 if not chunk.metadata.section_path:
                     chunk.metadata.section_path = path_str
 
+        chunk_count = 0
+
         if self._qdrant:
-            # Supersede prior active version (if any) for this document_id
-            # We detect prior version by checking document_records
+            # Detect prior version BEFORE upsert so we can supersede after commit
             prior_version: int | None = None
             if self._doc_store:
                 existing = self._doc_store.get_active(scope, source)
                 if existing:
-                    # Extract version from the source string used in prior ingest
-                    try:
-                        prior_version = int(existing.source.split(":v")[-1])
-                    except (ValueError, IndexError):
-                        prior_version = None
+                    # Read prior version from stored metadata
+                    prior_meta = getattr(existing, "metadata", None) or {}
+                    prior_version = prior_meta.get("version")
 
-            # Upsert new chunks with versioned payload
+            # Upsert new version chunks (status=active in payload)
             chunk_count = self._qdrant.ingest_chunks_versioned(
                 scope=scope,
                 chunks=raw_chunks,
@@ -824,8 +858,8 @@ class KnowledgeService:
                 version=version,
             )
 
-            # Supersede prior version in Qdrant if detected
-            if prior_version is not None:
+            # Supersede prior version in Qdrant (if any) — after new chunks are committed
+            if prior_version is not None and prior_version != version:
                 try:
                     self._qdrant.supersede_document_version(scope, doc_id, prior_version)
                 except Exception as exc:
@@ -834,24 +868,30 @@ class KnowledgeService:
                         prior_version, doc_id, exc,
                     )
         else:
-            # In-memory fallback (dev/test)
+            # In-memory fallback (dev/test without Qdrant)
             if scope not in self._chunks:
                 self._chunks[scope] = []
+            # Remove prior version chunks for this document_id (in-memory replacement)
+            self._chunks[scope] = [
+                c for c in self._chunks[scope]
+                if not (hasattr(c.metadata, "document_hash") and c.metadata.source == source)
+            ]
             self._chunks[scope].extend(raw_chunks)
             chunk_count = len(raw_chunks)
 
-        # Update document_records (uses source as the identity key)
+        # Update document_records with stable source and version stored in metadata
         if self._doc_store:
-            existing_record = self._doc_store.get_active(scope, source)
             new_record = DocumentRecord(
                 scope=scope,
                 source=source,
                 document_hash=doc_hash,
                 format=fmt,
-                chunk_count=len(raw_chunks),
+                chunk_count=chunk_count,
                 ingested_at=ingested_at,
                 status=DocumentRecordStatus.ACTIVE,
+                metadata={"version": version},
             )
+            existing_record = self._doc_store.get_active(scope, source)
             if existing_record:
                 self._doc_store.replace_active(scope, source, new_record)
             else:

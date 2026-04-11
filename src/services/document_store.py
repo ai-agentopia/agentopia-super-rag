@@ -6,6 +6,7 @@ Source of truth across restarts — no in-memory fallback for production.
 For testing without Postgres, InMemoryDocumentStore provides the same interface.
 """
 
+import json
 import logging
 import os
 import time
@@ -110,7 +111,7 @@ class PostgresDocumentStore:
         with self._conn.cursor() as cur:
             cur.execute(
                 """SELECT id, scope, source, document_hash, format, source_type, chunk_count,
-                          ingested_at, status, superseded_at, deleted_at
+                          ingested_at, status, superseded_at, deleted_at, metadata
                    FROM document_records
                    WHERE scope = %s AND source = %s AND status = 'active'
                    LIMIT 1""",
@@ -125,8 +126,9 @@ class PostgresDocumentStore:
         with self._conn.cursor() as cur:
             cur.execute(
                 """INSERT INTO document_records
-                   (scope, source, document_hash, format, source_type, chunk_count, ingested_at, status)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                   (scope, source, document_hash, format, source_type, chunk_count,
+                    ingested_at, status, metadata)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                    RETURNING id""",
                 (
                     record.scope,
@@ -137,6 +139,7 @@ class PostgresDocumentStore:
                     record.chunk_count,
                     record.ingested_at,
                     record.status.value,
+                    json.dumps(record.metadata),
                 ),
             )
             record.id = cur.fetchone()[0]
@@ -162,8 +165,9 @@ class PostgresDocumentStore:
                 # Step 2: create new active
                 cur.execute(
                     """INSERT INTO document_records
-                       (scope, source, document_hash, format, source_type, chunk_count, ingested_at, status)
-                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                       (scope, source, document_hash, format, source_type, chunk_count,
+                        ingested_at, status, metadata)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
                        RETURNING id""",
                     (
                         new_record.scope,
@@ -174,6 +178,7 @@ class PostgresDocumentStore:
                         new_record.chunk_count,
                         new_record.ingested_at,
                         new_record.status.value,
+                        json.dumps(new_record.metadata),
                     ),
                 )
                 new_record.id = cur.fetchone()[0]
@@ -220,7 +225,7 @@ class PostgresDocumentStore:
         with self._conn.cursor() as cur:
             cur.execute(
                 """SELECT id, scope, source, document_hash, format, source_type, chunk_count,
-                          ingested_at, status, superseded_at, deleted_at
+                          ingested_at, status, superseded_at, deleted_at, metadata
                    FROM document_records
                    WHERE scope = %s AND status = 'active'
                    ORDER BY source""",
@@ -232,7 +237,7 @@ class PostgresDocumentStore:
         with self._conn.cursor() as cur:
             cur.execute(
                 """SELECT id, scope, source, document_hash, format, source_type, chunk_count,
-                          ingested_at, status, superseded_at, deleted_at
+                          ingested_at, status, superseded_at, deleted_at, metadata
                    FROM document_records
                    WHERE scope = %s
                    ORDER BY source, created_at""",
@@ -242,6 +247,16 @@ class PostgresDocumentStore:
 
     @staticmethod
     def _row_to_record(row) -> DocumentRecord:
+        raw_meta = row[11]
+        if isinstance(raw_meta, str):
+            try:
+                meta = json.loads(raw_meta)
+            except Exception:
+                meta = {}
+        elif isinstance(raw_meta, dict):
+            meta = raw_meta
+        else:
+            meta = {}
         return DocumentRecord(
             id=row[0],
             scope=row[1],
@@ -254,6 +269,7 @@ class PostgresDocumentStore:
             status=DocumentRecordStatus(row[8]),
             superseded_at=row[9],
             deleted_at=row[10],
+            metadata=meta,
         )
 
 
