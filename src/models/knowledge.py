@@ -179,3 +179,46 @@ class RepoIndexConfig(BaseModel):
     include_patterns: list[str] = ["**/*.py", "**/*.ts", "**/*.js", "**/*.go"]
     exclude_patterns: list[str] = ["**/node_modules/**", "**/.git/**", "**/vendor/**"]
     scope: str = ""  # Target knowledge scope
+
+
+# ── Orchestrator ingest contract ─────────────────────────────────────────────
+# Called by agentopia-knowledge-ingest Orchestrator after normalization and
+# extraction complete. Accepts pre-parsed text + structured metadata.
+# See docs/architecture.md — Super RAG Integration Boundary.
+
+
+class OrchestratorIngestMetadata(BaseModel):
+    """Extracted document metadata from agentopia-knowledge-ingest extractor."""
+
+    title: str = ""
+    author: str = ""
+    date: str = ""  # ISO date string or empty
+    language: str = "en"
+    format: str = "text"  # pdf | docx | html | markdown | txt
+    hierarchy: list[dict] = []  # Nested section tree from extracted.json
+    section_path: list[str] = []  # Flat heading path to document root context
+    tags: list[str] = []
+
+
+class OrchestratorIngestRequest(BaseModel):
+    """Request body for POST /api/v1/knowledge/{scope}/ingest-document.
+
+    Sent by the Ingest Orchestrator in agentopia-knowledge-ingest after
+    the Normalizer and Extractor have completed their stages.
+    """
+
+    document_id: str  # Stable UUID from upstream document registry
+    version: int  # Version number; tags all Qdrant chunks for this ingest
+    text: str  # Full normalized plain text from normalized.json
+    metadata: OrchestratorIngestMetadata = OrchestratorIngestMetadata()
+    chunking_strategy: ChunkingStrategy = ChunkingStrategy.FIXED_SIZE
+
+
+class OrchestratorIngestResponse(BaseModel):
+    """Response from POST /api/v1/knowledge/{scope}/ingest-document."""
+
+    document_id: str
+    scope: str
+    version: int
+    chunk_count: int
+    status: str = "indexed"  # "indexed" | "skipped" (duplicate)

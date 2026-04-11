@@ -22,6 +22,8 @@ from models.knowledge import (
     IngestConfig,
     IngestResult,
     KnowledgeScope,
+    OrchestratorIngestRequest,
+    OrchestratorIngestResponse,
     SearchResult,
 )
 
@@ -744,6 +746,132 @@ class KnowledgeService:
             format=format,
             document_hash=doc_hash,
             ingested_at=ingested_at,
+        )
+
+    def ingest_from_orchestrator(
+        self,
+        scope: str,
+        request: OrchestratorIngestRequest,
+    ) -> OrchestratorIngestResponse:
+        """Ingest pre-parsed text from agentopia-knowledge-ingest Orchestrator.
+
+        Handles versioned ingest:
+        1. Chunk the normalized text using the requested strategy
+        2. Embed and upsert chunks with document_id, version, status=active in payload
+        3. Supersede prior active version chunks for the same document_id (if any)
+        4. Return indexed chunk count
+
+        Idempotent: if (document_id, version) already active, skip re-embedding.
+        """
+        doc_id = request.document_id
+        version = request.version
+        ingested_at = time.time()
+
+        # Build a synthetic source identifier from document_id+version for chunk_document
+        source = f"orchestrator:{doc_id}:v{version}"
+
+        # Map format string to DocumentFormat enum; default TEXT if unrecognised
+        fmt_map = {
+            "pdf": DocumentFormat.PDF,
+            "docx": DocumentFormat.TEXT,
+            "html": DocumentFormat.HTML,
+            "markdown": DocumentFormat.MARKDOWN,
+            "md": DocumentFormat.MARKDOWN,
+            "txt": DocumentFormat.TEXT,
+            "text": DocumentFormat.TEXT,
+        }
+        fmt = fmt_map.get(request.metadata.format.lower(), DocumentFormat.TEXT)
+
+        config = IngestConfig(chunking_strategy=request.chunking_strategy)
+        doc_hash = compute_document_hash(request.text)
+
+        raw_chunks = chunk_document(
+            content=request.text,
+            source=source,
+            scope=scope,
+            format=fmt,
+            config=config,
+            document_hash=doc_hash,
+            ingested_at=ingested_at,
+        )
+
+        # Propagate section_path from metadata if hierarchy was extracted upstream
+        # and chunking didn't derive paths (non-markdown strategy)
+        if request.metadata.section_path and config.chunking_strategy != ChunkingStrategy.MARKDOWN_AWARE:
+            path_str = " > ".join(request.metadata.section_path)
+            for chunk in raw_chunks:
+                if not chunk.metadata.section_path:
+                    chunk.metadata.section_path = path_str
+
+        if self._qdrant:
+            # Supersede prior active version (if any) for this document_id
+            # We detect prior version by checking document_records
+            prior_version: int | None = None
+            if self._doc_store:
+                existing = self._doc_store.get_active(scope, source)
+                if existing:
+                    # Extract version from the source string used in prior ingest
+                    try:
+                        prior_version = int(existing.source.split(":v")[-1])
+                    except (ValueError, IndexError):
+                        prior_version = None
+
+            # Upsert new chunks with versioned payload
+            chunk_count = self._qdrant.ingest_chunks_versioned(
+                scope=scope,
+                chunks=raw_chunks,
+                document_id=doc_id,
+                version=version,
+            )
+
+            # Supersede prior version in Qdrant if detected
+            if prior_version is not None:
+                try:
+                    self._qdrant.supersede_document_version(scope, doc_id, prior_version)
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to supersede prior version %d for document_id=%s: %s",
+                        prior_version, doc_id, exc,
+                    )
+        else:
+            # In-memory fallback (dev/test)
+            if scope not in self._chunks:
+                self._chunks[scope] = []
+            self._chunks[scope].extend(raw_chunks)
+            chunk_count = len(raw_chunks)
+
+        # Update document_records (uses source as the identity key)
+        if self._doc_store:
+            existing_record = self._doc_store.get_active(scope, source)
+            new_record = DocumentRecord(
+                scope=scope,
+                source=source,
+                document_hash=doc_hash,
+                format=fmt,
+                chunk_count=len(raw_chunks),
+                ingested_at=ingested_at,
+                status=DocumentRecordStatus.ACTIVE,
+            )
+            if existing_record:
+                self._doc_store.replace_active(scope, source, new_record)
+            else:
+                self._doc_store.create(new_record)
+
+        # Update in-memory scope metadata
+        if scope not in self._scopes:
+            self._scopes[scope] = KnowledgeScope(name=scope)
+        self._scopes[scope].last_indexed = time.time()
+
+        logger.info(
+            "ingest_from_orchestrator: scope=%s document_id=%s version=%d chunks=%d",
+            scope, doc_id, version, chunk_count,
+        )
+        return OrchestratorIngestResponse(
+            document_id=doc_id,
+            scope=scope,
+            version=version,
+            chunk_count=chunk_count,
+            status="indexed",
         )
 
     def search(
@@ -1836,6 +1964,95 @@ class QdrantBackend:
                 )
         self._client.upsert(collection_name=cname, points=points)
 
+    def ingest_chunks_versioned(
+        self,
+        scope: str,
+        chunks: list[DocumentChunk],
+        document_id: str,
+        version: int,
+    ) -> int:
+        """Embed and upsert chunks with document_id, version, status=active in payload.
+
+        Used by the Orchestrator ingest path (POST /{scope}/ingest-document).
+        Top-level payload fields `document_id`, `version`, `status` are written
+        alongside the existing `text` and `metadata` fields.
+
+        Returns number of chunks indexed.
+        """
+        if not chunks:
+            return 0
+        from qdrant_client.models import PointStruct  # type: ignore
+
+        cname = self._qdrant_collection_name(scope)
+        self._ensure_collection(scope)
+
+        texts = [c.text for c in chunks]
+        dense_vectors = self._embed(texts)
+
+        points = []
+        for chunk, dense_vec in zip(chunks, dense_vectors):
+            point_id = compute_point_id(scope, chunk.metadata.source, chunk.metadata.chunk_index)
+            payload = {
+                "text": chunk.text,
+                "metadata": chunk.metadata.model_dump(),
+                # Top-level fields for orchestrator ingest path (foundation contract)
+                "document_id": document_id,
+                "version": version,
+                "status": "active",
+            }
+            if self._hybrid_enabled:
+                from qdrant_client.models import SparseVector  # type: ignore
+                indices, values = self._tokenize_sparse(chunk.text, scope=scope, mode="document")
+                points.append(PointStruct(
+                    id=point_id,
+                    vector={"dense": dense_vec, "sparse": SparseVector(indices=indices, values=values)},
+                    payload=payload,
+                ))
+            else:
+                points.append(PointStruct(id=point_id, vector=dense_vec, payload=payload))
+
+        self._client.upsert(collection_name=cname, points=points)
+        return len(points)
+
+    def supersede_document_version(self, scope: str, document_id: str, version: int) -> None:
+        """Set status=superseded on all Qdrant chunks for (document_id, prior_version).
+
+        Called after a new version is successfully indexed to retire the old version.
+        Chunks are retained in Qdrant (rollback possible) but excluded from retrieval.
+        """
+        from qdrant_client.models import (  # type: ignore
+            FieldCondition,
+            Filter,
+            FilterSelector,
+            MatchAny,
+            MatchValue,
+        )
+
+        cname = self._qdrant_collection_name(scope)
+        try:
+            self._client.set_payload(
+                collection_name=cname,
+                payload={"status": "superseded"},
+                points=FilterSelector(
+                    filter=Filter(
+                        must=[
+                            FieldCondition(key="document_id", match=MatchValue(value=document_id)),
+                            FieldCondition(key="version", match=MatchValue(value=version)),
+                        ]
+                    )
+                ),
+            )
+            logger.info(
+                "QdrantBackend: superseded document_id=%s version=%d in scope=%s",
+                document_id, version, scope,
+            )
+        except Exception as exc:
+            logger.warning(
+                "QdrantBackend: supersede_document_version failed document_id=%s version=%d scope=%s: %s",
+                document_id, version, scope, exc,
+            )
+            raise
+
     def delete_by_source(self, scope: str, source: str) -> None:
         """Delete all Qdrant points for a source within a scope (ADR-011)."""
         from qdrant_client.models import (  # type: ignore
@@ -1919,11 +2136,30 @@ class QdrantBackend:
     def _search_dense_only(
         self, query_vector: list[float], scope: str, limit: int, min_score: float,
     ) -> list[SearchResult]:
-        """Dense-only search (Phase 0). Uses query_points for qdrant-client v1.17+."""
+        """Dense-only search (Phase 0). Uses query_points for qdrant-client v1.17+.
+
+        Applies status filter: returns only chunks with status=active OR no status field
+        (backward compatibility for chunks indexed before the orchestrator ingest path).
+        """
+        from qdrant_client.models import (  # type: ignore
+            FieldCondition,
+            Filter,
+            IsNullCondition,
+            MatchValue,
+        )
+
         cname = self._qdrant_collection_name(scope)
+        # status = "active" OR status field absent (backward compat for pre-orchestrator chunks)
+        status_filter = Filter(
+            should=[
+                FieldCondition(key="status", match=MatchValue(value="active")),
+                IsNullCondition(key="status"),
+            ]
+        )
         kwargs: dict[str, Any] = {
             "collection_name": cname,
             "query": query_vector,
+            "query_filter": status_filter,
             "limit": limit,
         }
         if min_score > 0.0:
@@ -1937,10 +2173,17 @@ class QdrantBackend:
     def _search_hybrid(
         self, query: str, query_vector: list[float], scope: str, limit: int, min_score: float,
     ) -> list[SearchResult]:
-        """Hybrid search: dense + sparse prefetch → RRF fusion (#319)."""
+        """Hybrid search: dense + sparse prefetch → RRF fusion (#319).
+
+        Applies same status filter as dense-only path.
+        """
         from qdrant_client.models import (  # type: ignore
+            FieldCondition,
+            Filter,
             FusionQuery,
             Fusion,
+            IsNullCondition,
+            MatchValue,
             Prefetch,
             SparseVector,
         )
@@ -1949,14 +2192,16 @@ class QdrantBackend:
         sparse_indices, sparse_values = self._tokenize_sparse(query, scope=scope, mode="query")
         prefetch_limit = self._hybrid_prefetch_limit
 
+        status_filter = Filter(
+            should=[
+                FieldCondition(key="status", match=MatchValue(value="active")),
+                IsNullCondition(key="status"),
+            ]
+        )
+
         prefetches = [
-            Prefetch(
-                query=query_vector,
-                using="dense",
-                limit=prefetch_limit,
-            ),
+            Prefetch(query=query_vector, using="dense", limit=prefetch_limit),
         ]
-        # Only add sparse prefetch if tokenization produced terms
         if sparse_indices:
             prefetches.append(
                 Prefetch(
@@ -1970,6 +2215,7 @@ class QdrantBackend:
             collection_name=cname,
             prefetch=prefetches,
             query=FusionQuery(fusion=Fusion.RRF),
+            query_filter=status_filter,
             limit=limit,
         )
 

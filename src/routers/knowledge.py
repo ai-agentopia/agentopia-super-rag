@@ -14,7 +14,12 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 
 from auth.guards import require_internal_auth, require_knowledge_read
-from models.knowledge import DocumentFormat
+from models.knowledge import (
+    ChunkingStrategy,
+    DocumentFormat,
+    OrchestratorIngestRequest,
+    OrchestratorIngestResponse,
+)
 from services.knowledge import get_knowledge_service, parse_html, parse_pdf
 
 logger = logging.getLogger(__name__)
@@ -254,6 +259,29 @@ async def ingest_file(
         "document_hash": result.document_hash,
         "ingested_at": result.ingested_at,
     }
+
+
+@write_router.post("/{scope}/ingest-document", response_model=OrchestratorIngestResponse, status_code=201)
+async def ingest_document_from_orchestrator(
+    scope: str,
+    body: OrchestratorIngestRequest,
+) -> OrchestratorIngestResponse:
+    """Ingest pre-parsed document text from agentopia-knowledge-ingest Orchestrator.
+
+    Called after normalization and extraction complete upstream.
+    Accepts plain text + structured metadata; handles chunking and embedding here.
+    Tags every chunk with document_id, version, and status=active in Qdrant payload.
+    Supersedes prior-version chunks for the same document_id in the same scope.
+
+    Idempotent: if (document_id, version) already indexed as active, returns without re-embedding.
+    """
+    scope = scope.replace("--", "/")
+    if not body.text.strip():
+        raise HTTPException(status_code=422, detail="text field is empty after normalization")
+
+    svc = get_knowledge_service()
+    result = svc.ingest_from_orchestrator(scope=scope, request=body)
+    return result
 
 
 @write_router.post("/{scope}/reindex")
