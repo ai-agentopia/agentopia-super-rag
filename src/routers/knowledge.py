@@ -319,6 +319,72 @@ async def delete_document(scope: str, source: str) -> dict[str, Any]:
     return {"status": "deleted", "scope": scope, "source": source, "chunks_removed": removed}
 
 
+# ── Retrieval debugger ────────────────────────────────────────────────────────
+# Requires X-Internal-Token (operator only — not accessible to bots).
+# Returns ranked results with full chunk metadata for operator inspection.
+
+@write_router.get("/debug/query")
+async def debug_query(
+    scope: str = Query(..., description="Scope to search within"),
+    q: str = Query(..., min_length=1, description="Query text"),
+    limit: int = Query(default=5, ge=1, le=20, description="Number of results to return"),
+) -> dict[str, Any]:
+    """Retrieval debugger — ranked results with chunk text, section_path, score, and document lineage.
+
+    Auth: X-Internal-Token (internal proxy only). Not accessible to bots.
+
+    Returns each result with:
+    - rank: result position (1-indexed)
+    - text: chunk text
+    - score: cosine similarity or RRF score
+    - source: document source key (filename/path)
+    - section_path: heading hierarchy path from document root
+    - section: immediate section heading
+    - page: page number (PDFs only; null otherwise)
+    - chunk_index: position within document
+    - document_hash: SHA-256 of original document (provenance)
+    - ingested_at: Unix timestamp when chunk was indexed (provenance)
+    - scope: scope this chunk belongs to
+
+    Designed for operator use when investigating retrieval quality issues.
+    Does not apply W3a/W3b/W4 experimental features — always dense-only baseline.
+    """
+    scope = scope.replace("--", "/")
+    svc = get_knowledge_service()
+
+    if svc.get_scope(scope) is None:
+        raise HTTPException(status_code=404, detail=f"Scope '{scope}' not found")
+
+    results = svc.search(query=q, scopes=[scope], limit=limit)
+
+    debug_results = []
+    for rank, r in enumerate(results, start=1):
+        debug_results.append({
+            "rank": rank,
+            "text": r.text,
+            "score": round(r.score, 6),
+            "source": r.citation.source,
+            "section_path": r.citation.section_path,
+            "section": r.citation.section,
+            "page": r.citation.page,
+            "chunk_index": r.citation.chunk_index,
+            "document_hash": r.citation.document_hash,
+            "ingested_at": r.citation.ingested_at,
+            "scope": r.scope,
+        })
+
+    logger.info(
+        "debug_query: scope=%s query_len=%d results=%d",
+        scope, len(q), len(debug_results),
+    )
+    return {
+        "scope": scope,
+        "query": q,
+        "result_count": len(debug_results),
+        "results": debug_results,
+    }
+
+
 # ── Combined router ───────────────────────────────────────────────────────────
 router = APIRouter()
 router.include_router(read_router)
