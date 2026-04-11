@@ -91,6 +91,10 @@ async def list_results(scope: str = "", limit: int = 50) -> dict:
 
 class OverrideRequest(BaseModel):
     operator_note: str = ""
+    operator_identity: str = ""
+    """Who is performing the override. Stored in evaluation_results for audit attribution.
+    Should be an operator identifier (email, username, or service account name).
+    Required when operator accountability is needed — empty string is accepted but not recommended."""
 
 
 @router.post("/results/{result_id}/override")
@@ -98,17 +102,30 @@ async def override_result(result_id: str, body: OverrideRequest) -> dict:
     """Record an operator override for a blocked evaluation result.
 
     The verdict changes from 'blocked' to 'overridden' in the evaluation_results table.
+    operator_identity is stored for audit attribution.
     This does not change the document's active status — it only records that the operator
     has explicitly accepted the regression.
     """
-    success = eval_svc.record_operator_override(result_id=result_id, operator_note=body.operator_note)
+    success = eval_svc.record_operator_override(
+        result_id=result_id,
+        operator_note=body.operator_note,
+        operator_identity=body.operator_identity,
+    )
     if not success:
         raise HTTPException(
             status_code=404,
             detail=f"Result '{result_id}' not found or not in 'blocked' state.",
         )
-    logger.info("evaluation: operator override result_id=%s note=%s", result_id, body.operator_note[:80])
-    return {"result_id": result_id, "verdict": "overridden", "operator_note": body.operator_note}
+    logger.info(
+        "evaluation: operator override result_id=%s identity=%s",
+        result_id, body.operator_identity or "(unset)",
+    )
+    return {
+        "result_id": result_id,
+        "verdict": "overridden",
+        "operator_note": body.operator_note,
+        "operator_identity": body.operator_identity,
+    }
 
 
 # ── Golden questions ──────────────────────────────────────────────────────────

@@ -169,6 +169,10 @@ def delete_golden_question(question_id: str) -> bool:
 def run_benchmark(scope: str, svc: "KnowledgeService") -> EvaluationMetrics | None:
     """Run all golden questions for scope against live retrieval. Return aggregate metrics.
 
+    Aggregation uses question weight (default 1.0) as a multiplier in a
+    weighted average so high-weight questions contribute proportionally more
+    to the final score.
+
     Returns None if there are no golden questions for this scope.
     """
     from evaluation.retrieval_metrics import compute_query_metrics
@@ -178,12 +182,16 @@ def run_benchmark(scope: str, svc: "KnowledgeService") -> EvaluationMetrics | No
         logger.info("evaluation: no golden questions for scope=%s — skipping benchmark", scope)
         return None
 
-    per_query_ndcg: list[float] = []
-    per_query_mrr: list[float] = []
-    per_query_p: list[float] = []
-    per_query_r: list[float] = []
+    weighted_ndcg: list[tuple[float, float]] = []   # (value, weight)
+    weighted_mrr:  list[tuple[float, float]] = []
+    weighted_p:    list[tuple[float, float]] = []
+    weighted_r:    list[tuple[float, float]] = []
 
     for q in questions:
+        weight = float(q.get("weight") or 1.0)
+        if weight <= 0:
+            weight = 1.0
+
         try:
             results = svc.search(query=q["query"], scopes=[scope], limit=K)
         except Exception as exc:
@@ -193,33 +201,32 @@ def run_benchmark(scope: str, svc: "KnowledgeService") -> EvaluationMetrics | No
         expected = {e["source"]: e["relevance"] for e in q["expected_sources"]}
         total_relevant = sum(1 for rel in expected.values() if rel >= 1)
 
-        # Build relevance list in retrieval rank order
-        relevances = [
-            float(expected.get(r.citation.source, 0))
-            for r in results
-        ]
-        # Pad to K with zeros if fewer results returned
+        # Build relevance list in retrieval rank order; pad to K with zeros
+        relevances = [float(expected.get(r.citation.source, 0)) for r in results]
         while len(relevances) < K:
             relevances.append(0.0)
 
         m = compute_query_metrics(relevances, total_relevant=total_relevant, k=K)
-        per_query_ndcg.append(m["ndcg"])
-        per_query_mrr.append(m["mrr"])
-        per_query_p.append(m["precision"])
-        per_query_r.append(m["recall"])
+        weighted_ndcg.append((m["ndcg"],     weight))
+        weighted_mrr.append((m["mrr"],       weight))
+        weighted_p.append((m["precision"],   weight))
+        weighted_r.append((m["recall"],      weight))
 
-    if not per_query_ndcg:
+    if not weighted_ndcg:
         return None
 
-    def _avg(lst: list[float]) -> float:
-        return round(sum(lst) / len(lst), 4)
+    def _wavg(pairs: list[tuple[float, float]]) -> float:
+        total_w = sum(w for _, w in pairs)
+        if total_w == 0:
+            return 0.0
+        return round(sum(v * w for v, w in pairs) / total_w, 4)
 
     return EvaluationMetrics(
-        ndcg_5=_avg(per_query_ndcg),
-        mrr=_avg(per_query_mrr),
-        p_5=_avg(per_query_p),
-        r_5=_avg(per_query_r),
-        question_count=len(per_query_ndcg),
+        ndcg_5=_wavg(weighted_ndcg),
+        mrr=_wavg(weighted_mrr),
+        p_5=_wavg(weighted_p),
+        r_5=_wavg(weighted_r),
+        question_count=len(weighted_ndcg),
     )
 
 
@@ -417,7 +424,9 @@ def check_regression(
         _write_result(
             result_id=result_id, scope=scope, document_id=document_id,
             document_version=document_version, trigger=trigger,
-            ndcg_5=metrics.ndcg_5, delta=delta, verdict=verdict,
+            ndcg_5=metrics.ndcg_5, mrr=metrics.mrr,
+            p_5=metrics.p_5, r_5=metrics.r_5,
+            delta=delta, verdict=verdict,
         )
 
         log_fn = logger.warning if verdict in ("warning", "blocked") else logger.info
@@ -458,8 +467,17 @@ def check_regression(
         )
 
 
-def record_operator_override(result_id: str, operator_note: str) -> bool:
-    """Mark an evaluation result as operator-overridden. Returns True on success."""
+def record_operator_override(
+    result_id: str,
+    operator_note: str,
+    operator_identity: str = "",
+) -> bool:
+    """Mark an evaluation result as operator-overridden. Returns True on success.
+
+    operator_identity: who performed the override (X-Internal-Token actor,
+    username, or any operator identifier the caller supplies). Stored in
+    evaluation_results.operator_identity for audit attribution.
+    """
     conn = _get_db_conn()
     if conn is None:
         return False
@@ -468,19 +486,23 @@ def record_operator_override(result_id: str, operator_note: str) -> bool:
             cur.execute(
                 """
                 UPDATE evaluation_results
-                SET operator_override = TRUE,
-                    operator_note     = %s,
-                    verdict           = 'overridden'
+                SET operator_override  = TRUE,
+                    operator_note      = %s,
+                    operator_identity  = %s,
+                    verdict            = 'overridden'
                 WHERE id = %s AND verdict = 'blocked'
                 """,
-                (operator_note, result_id),
+                (operator_note, operator_identity or None, result_id),
             )
             updated = cur.rowcount > 0
         conn.commit()
     finally:
         conn.close()
     if updated:
-        logger.info("evaluation: operator override recorded result_id=%s", result_id)
+        logger.info(
+            "evaluation: operator override recorded result_id=%s identity=%s",
+            result_id, operator_identity or "(unset)",
+        )
     return updated
 
 
@@ -498,7 +520,7 @@ def get_evaluation_results(scope: str, limit: int = 50) -> list[dict]:
                 """
                 SELECT id, scope, document_id, document_version, run_at,
                        trigger, ndcg_5, mrr, p_5, r_5, delta_ndcg_5,
-                       verdict, operator_override, operator_note
+                       verdict, operator_override, operator_note, operator_identity
                 FROM evaluation_results
                 WHERE scope = %s
                 ORDER BY run_at DESC
@@ -523,10 +545,18 @@ def _write_result(
     document_version: int | None,
     trigger: str,
     ndcg_5: float | None,
+    mrr: float | None = None,
+    p_5: float | None = None,
+    r_5: float | None = None,
     delta: float | None,
     verdict: str,
 ) -> None:
-    """Append one row to evaluation_results. Never raises — logs errors."""
+    """Append one row to evaluation_results with the full metric set.
+
+    All four metrics (ndcg_5, mrr, p_5, r_5) are persisted so historical
+    rows contain a complete quality snapshot, not just the gate metric.
+    Never raises — logs errors instead.
+    """
     conn = _get_db_conn()
     if conn is None:
         logger.warning("evaluation: DB unavailable — result not persisted verdict=%s scope=%s", verdict, scope)
@@ -537,11 +567,11 @@ def _write_result(
                 """
                 INSERT INTO evaluation_results
                     (id, scope, document_id, document_version, trigger,
-                     ndcg_5, delta_ndcg_5, verdict)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                     ndcg_5, mrr, p_5, r_5, delta_ndcg_5, verdict)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (result_id, scope, document_id, document_version, trigger,
-                 ndcg_5, delta, verdict),
+                 ndcg_5, mrr, p_5, r_5, delta, verdict),
             )
         conn.commit()
     except Exception as exc:
@@ -568,4 +598,5 @@ def _result_row_to_dict(row) -> dict:
         "verdict": row[11],
         "operator_override": row[12],
         "operator_note": row[13],
+        "operator_identity": row[14],
     }

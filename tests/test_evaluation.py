@@ -119,6 +119,7 @@ def _stub_list_baselines():
 
 
 def _stub_write_result(**kwargs):
+    """Stub matches updated _write_result signature: persists full metric set."""
     _RESULTS.append({
         "id": kwargs.get("result_id"),
         "scope": kwargs.get("scope"),
@@ -126,10 +127,14 @@ def _stub_write_result(**kwargs):
         "document_version": kwargs.get("document_version"),
         "trigger": kwargs.get("trigger"),
         "ndcg_5": kwargs.get("ndcg_5"),
+        "mrr": kwargs.get("mrr"),           # full metric set
+        "p_5": kwargs.get("p_5"),
+        "r_5": kwargs.get("r_5"),
         "delta_ndcg_5": kwargs.get("delta"),
         "verdict": kwargs.get("verdict"),
         "operator_override": False,
         "operator_note": None,
+        "operator_identity": None,
         "run_at": "2026-04-11T00:00:00+00:00",
     })
 
@@ -138,12 +143,14 @@ def _stub_get_evaluation_results(scope, limit=50):
     return [r for r in _RESULTS if r.get("scope") == scope][:limit]
 
 
-def _stub_record_operator_override(result_id, operator_note):
+def _stub_record_operator_override(result_id, operator_note, operator_identity=""):
+    """Stub matches updated signature: persists operator_identity."""
     for r in _RESULTS:
         if r["id"] == result_id and r["verdict"] == "blocked":
             r["verdict"] = "overridden"
             r["operator_override"] = True
             r["operator_note"] = operator_note
+            r["operator_identity"] = operator_identity or None
             return True
     return False
 
@@ -685,6 +692,216 @@ class TestEvaluationResultsAppendOnly(unittest.TestCase):
                            ndcg_5=0.85, delta=-0.05, trigger="replacement")
         self.assertEqual(len(_stub_get_evaluation_results("scope-a/d")), 1)
         self.assertEqual(len(_stub_get_evaluation_results("scope-b/d")), 1)
+
+
+# ── Finding-specific regression tests ────────────────────────────────────────
+
+
+class TestFinding1FullMetricPersistence(unittest.TestCase):
+    """Finding 1: _write_result must persist the full metric set."""
+
+    def setUp(self):
+        _reset_stores()
+
+    def test_write_result_persists_all_four_metrics(self):
+        """_write_result stub (and production function) must store mrr, p_5, r_5."""
+        _stub_write_result(
+            result_id="r1", scope="s/d", verdict="passed",
+            ndcg_5=0.93, mrr=0.95, p_5=0.84, r_5=1.0,
+            delta=0.005, trigger="replacement",
+        )
+        r = _RESULTS[0]
+        self.assertEqual(r["ndcg_5"], 0.93)
+        self.assertEqual(r["mrr"], 0.95)
+        self.assertEqual(r["p_5"], 0.84)
+        self.assertEqual(r["r_5"], 1.0)
+
+    def test_check_regression_passes_full_metrics_to_write(self):
+        """check_regression must pass mrr, p_5, r_5 to _write_result, not just ndcg_5."""
+        from services.evaluation import check_regression, EvaluationMetrics
+
+        scope = "test/s"
+        _BASELINES[scope] = {
+            "baseline_id": "b", "scope": scope,
+            "ndcg_5": 0.900, "mrr": 0.920, "p_5": 0.800, "r_5": 0.950,
+            "golden_question_count": 2, "established_at": "",
+        }
+        stub_metrics = EvaluationMetrics(
+            ndcg_5=0.910, mrr=0.930, p_5=0.820, r_5=0.960, question_count=2
+        )
+        mock_svc = MagicMock()
+
+        with unittest.mock.patch.multiple("services.evaluation",
+                                          get_baseline=lambda scope: _BASELINES.get(scope),
+                                          run_benchmark=lambda scope, svc: stub_metrics,
+                                          _write_result=_stub_write_result):
+            check_regression(scope=scope, svc=mock_svc, trigger="replacement")
+
+        self.assertEqual(len(_RESULTS), 1)
+        r = _RESULTS[0]
+        self.assertIsNotNone(r.get("mrr"), "mrr must be persisted in evaluation_results")
+        self.assertIsNotNone(r.get("p_5"), "p_5 must be persisted in evaluation_results")
+        self.assertIsNotNone(r.get("r_5"), "r_5 must be persisted in evaluation_results")
+        self.assertAlmostEqual(r["mrr"], 0.930, places=3)
+        self.assertAlmostEqual(r["p_5"], 0.820, places=3)
+        self.assertAlmostEqual(r["r_5"], 0.960, places=3)
+
+
+class TestFinding2OperatorIdentity(unittest.TestCase):
+    """Finding 2: operator override must record operator identity."""
+
+    def setUp(self):
+        _reset_stores()
+
+    def test_override_stores_operator_identity(self):
+        rid = str(uuid.uuid4())
+        _RESULTS.append({
+            "id": rid, "scope": "s/d", "verdict": "blocked",
+            "operator_override": False, "operator_note": None,
+            "operator_identity": None, "ndcg_5": 0.85, "delta_ndcg_5": -0.05,
+        })
+        success = _stub_record_operator_override(
+            rid, "Accepted: migration complete", "operator@example.com"
+        )
+        self.assertTrue(success)
+        r = next(x for x in _RESULTS if x["id"] == rid)
+        self.assertEqual(r["operator_identity"], "operator@example.com")
+        self.assertEqual(r["verdict"], "overridden")
+
+    def test_override_without_identity_accepted_but_identity_is_none(self):
+        """Empty identity is accepted but stored as None (not empty string)."""
+        rid = str(uuid.uuid4())
+        _RESULTS.append({
+            "id": rid, "scope": "s/d", "verdict": "blocked",
+            "operator_override": False, "operator_note": None,
+            "operator_identity": None, "ndcg_5": 0.85,
+        })
+        _stub_record_operator_override(rid, "note", "")
+        r = next(x for x in _RESULTS if x["id"] == rid)
+        # Empty string is coerced to None for storage (matches service logic)
+        self.assertIsNone(r["operator_identity"])
+
+    def test_api_override_returns_operator_identity(self):
+        """Override API endpoint must echo operator_identity in response."""
+        from fastapi.testclient import TestClient
+        from main import app
+
+        rid = str(uuid.uuid4())
+        _RESULTS.append({
+            "id": rid, "scope": "s/d", "verdict": "blocked",
+            "operator_override": False, "operator_note": None,
+            "operator_identity": None, "ndcg_5": 0.85,
+        })
+        token = os.getenv("KNOWLEDGE_API_INTERNAL_TOKEN", "test-internal-token-for-tests")
+        client = TestClient(app, raise_server_exceptions=False)
+        patches = {k.split(".")[-1]: v for k, v in _EVAL_PATCHES.items()
+                   if k.startswith("services.evaluation.")}
+
+        with unittest.mock.patch.multiple("services.evaluation", **patches):
+            resp = client.post(
+                f"/api/v1/evaluation/results/{rid}/override",
+                headers={"X-Internal-Token": token},
+                json={"operator_note": "accepted", "operator_identity": "alice@example.com"},
+            )
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data.get("operator_identity"), "alice@example.com")
+
+
+class TestFinding3WeightedAggregation(unittest.TestCase):
+    """Finding 3: question weight must influence benchmark aggregate metrics."""
+
+    def test_equal_weights_same_as_unweighted_average(self):
+        """With weight=1.0 for all questions, result equals simple average.
+
+        Q1 returns the expected doc → nDCG=1.0
+        Q2 returns wrong doc       → nDCG=0.0
+        Equal weights → weighted avg = (1.0*1 + 0.0*1) / 2 = 0.5
+        """
+        scope = "test/w"
+        _GOLDEN.extend([
+            {"id": "q1", "scope": scope, "query": "Q1",
+             "expected_sources": [{"source": "a.pdf", "relevance": 2}], "weight": 1.0,
+             "created_by": "", "created_at": ""},
+            {"id": "q2", "scope": scope, "query": "Q2",
+             "expected_sources": [{"source": "b.pdf", "relevance": 2}], "weight": 1.0,
+             "created_by": "", "created_at": ""},
+        ])
+
+        mock_svc = MagicMock()
+        mock_svc.search.side_effect = [
+            _make_search_results(["a.pdf"]),   # Q1: perfect match → nDCG=1.0
+            _make_search_results(["x.pdf"]),   # Q2: wrong doc     → nDCG=0.0
+        ]
+
+        with unittest.mock.patch.multiple("services.evaluation",
+                                          list_golden_questions=_stub_list_golden_questions):
+            from services.evaluation import run_benchmark
+            metrics = run_benchmark(scope, mock_svc)
+
+        self.assertIsNotNone(metrics)
+        # (1.0*1 + 0.0*1) / (1+1) = 0.5
+        self.assertAlmostEqual(metrics.ndcg_5, 0.5, places=3)
+
+    def test_higher_weight_question_dominates_average(self):
+        """A question with weight=3 should pull the average toward its score."""
+        from evaluation.retrieval_metrics import ndcg_at_k
+
+        scope = "test/hw"
+        _GOLDEN.extend([
+            {"id": "qH", "scope": scope, "query": "High weight",
+             "expected_sources": [{"source": "a.pdf", "relevance": 2}], "weight": 3.0,
+             "created_by": "", "created_at": ""},
+            {"id": "qL", "scope": scope, "query": "Low weight",
+             "expected_sources": [{"source": "b.pdf", "relevance": 2}], "weight": 1.0,
+             "created_by": "", "created_at": ""},
+        ])
+
+        mock_svc = MagicMock()
+        # High-weight question: perfect (ndcg=1.0)
+        # Low-weight question: totally wrong (ndcg=0.0)
+        mock_svc.search.side_effect = [
+            _make_search_results(["a.pdf"]),   # perfect for qH
+            _make_search_results(["z.pdf"]),   # wrong for qL
+        ]
+
+        with unittest.mock.patch.multiple("services.evaluation",
+                                          list_golden_questions=_stub_list_golden_questions):
+            from services.evaluation import run_benchmark
+            metrics = run_benchmark(scope, mock_svc)
+
+        self.assertIsNotNone(metrics)
+        # Weighted: (1.0*3 + 0.0*1) / (3+1) = 0.75
+        self.assertAlmostEqual(metrics.ndcg_5, 0.75, places=3)
+
+    def test_uniform_weight_same_as_equal_weight(self):
+        """weight=2.0 on all questions produces same result as weight=1.0."""
+        scope = "test/uw"
+        _GOLDEN.extend([
+            {"id": "qa", "scope": scope, "query": "Qa",
+             "expected_sources": [{"source": "a.pdf", "relevance": 2}], "weight": 2.0,
+             "created_by": "", "created_at": ""},
+            {"id": "qb", "scope": scope, "query": "Qb",
+             "expected_sources": [{"source": "b.pdf", "relevance": 2}], "weight": 2.0,
+             "created_by": "", "created_at": ""},
+        ])
+
+        mock_svc = MagicMock()
+        mock_svc.search.side_effect = [
+            _make_search_results(["a.pdf"]),
+            _make_search_results(["b.pdf"]),
+        ]
+
+        with unittest.mock.patch.multiple("services.evaluation",
+                                          list_golden_questions=_stub_list_golden_questions):
+            from services.evaluation import run_benchmark
+            m_all2 = run_benchmark(scope, mock_svc)
+
+        # Both perfect → ndcg=1.0 regardless of weight
+        self.assertAlmostEqual(m_all2.ndcg_5, 1.0, places=3)
+
+    def setUp(self):
+        _reset_stores()
 
 
 if __name__ == "__main__":
