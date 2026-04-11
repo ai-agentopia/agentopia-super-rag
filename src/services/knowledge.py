@@ -906,6 +906,38 @@ class KnowledgeService:
             "ingest_from_orchestrator: scope=%s document_id=%s version=%d chunks=%d",
             scope, doc_id, version, chunk_count,
         )
+
+        # ── Regression check on replacement ──────────────────────────────────
+        # Only triggered when a prior version was superseded (is_replacement).
+        # Runs after commit so retrieval is never blocked.
+        # Failures are logged but never propagate — ingest is already complete.
+        is_replacement = prior_version is not None and prior_version != version
+        if is_replacement:
+            try:
+                from services.evaluation import check_regression
+                reg_result = check_regression(
+                    scope=scope,
+                    svc=self,
+                    trigger="replacement",
+                    document_id=doc_id,
+                    document_version=version,
+                )
+                if reg_result.verdict == "blocked":
+                    logger.warning(
+                        "ingest_from_orchestrator: REGRESSION BLOCKED scope=%s "
+                        "document_id=%s version=%d ndcg_5=%.4f delta=%+.4f result_id=%s",
+                        scope, doc_id, version,
+                        reg_result.ndcg_5 or 0.0,
+                        reg_result.delta_ndcg_5 or 0.0,
+                        reg_result.result_id,
+                    )
+            except Exception as exc:
+                logger.warning(
+                    "ingest_from_orchestrator: regression check failed scope=%s: %s "
+                    "(document is active — evaluation failure does not roll back ingest)",
+                    scope, exc,
+                )
+
         return OrchestratorIngestResponse(
             document_id=doc_id,
             scope=scope,

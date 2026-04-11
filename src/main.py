@@ -28,6 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from routers.knowledge import router as knowledge_router
 from routers.internal import router as internal_router
+from routers.evaluation import router as evaluation_router
 
 VERSION = "1.0.0"
 
@@ -78,6 +79,20 @@ async def lifespan(app: FastAPI):
             logger.warning("binding_cache: startup rebuild failed — cache is empty", exc_info=True)
     else:
         logger.info("binding_cache: K8s not available, starting with empty cache (local dev)")
+
+    # ── Evaluation schema migration ───────────────────────────────────────
+    database_url = os.getenv("DATABASE_URL", "")
+    if database_url:
+        try:
+            import pathlib, psycopg
+            sql_path = pathlib.Path(__file__).parent.parent / "db" / "025_evaluation.sql"
+            if sql_path.exists():
+                conn = psycopg.connect(database_url, autocommit=True)
+                conn.execute(sql_path.read_text())
+                conn.close()
+                logger.info("evaluation: schema migration applied")
+        except Exception as exc:
+            logger.warning("evaluation: schema migration failed (non-fatal): %s", exc)
 
     # ── Qdrant connectivity check ─────────────────────────────────────────
     qdrant_url = os.getenv("QDRANT_URL", "")
@@ -142,6 +157,7 @@ app.add_middleware(
 # ── Routes ────────────────────────────────────────────────────────────────────
 app.include_router(knowledge_router, prefix="/api/v1/knowledge", tags=["knowledge"])
 app.include_router(internal_router, tags=["internal"])
+app.include_router(evaluation_router, prefix="/api/v1", tags=["evaluation"])
 
 
 # ── Health ────────────────────────────────────────────────────────────────────
