@@ -85,12 +85,14 @@ async def lifespan(app: FastAPI):
     if database_url:
         try:
             import pathlib, psycopg
-            sql_path = pathlib.Path(__file__).parent.parent / "db" / "025_evaluation.sql"
-            if sql_path.exists():
-                conn = psycopg.connect(database_url, autocommit=True)
-                conn.execute(sql_path.read_text())
-                conn.close()
-                logger.info("evaluation: schema migration applied")
+            db_dir = pathlib.Path(__file__).parent.parent / "db"
+            conn = psycopg.connect(database_url, autocommit=True)
+            for migration in ("025_evaluation.sql", "026_eval_fixes.sql"):
+                sql_path = db_dir / migration
+                if sql_path.exists():
+                    conn.execute(sql_path.read_text())
+                    logger.info("evaluation: applied migration %s", migration)
+            conn.close()
         except Exception as exc:
             logger.warning("evaluation: schema migration failed (non-fatal): %s", exc)
 
