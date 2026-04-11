@@ -1,5 +1,21 @@
 # Operations
 
+## Retrieval Debugger
+
+Operators can inspect ranked retrieval results with full chunk metadata:
+
+```
+GET /api/v1/knowledge/debug/query?scope={scope}&q={query}&limit={N}
+```
+
+Auth: `X-Internal-Token` (operator only — not accessible to bots).
+
+Returns: rank, score, source, section_path, section, page, chunk_index, document_hash, ingested_at, text.
+
+Does not apply experimental features (W3a/W3b/W4). Always runs dense-only baseline retrieval.
+
+---
+
 ## Super RAG Integration Boundary
 
 Super RAG's `/ingest` endpoint is called by the Ingest Orchestrator in `agentopia-knowledge-ingest` after normalization and extraction complete. Super RAG does not own upstream document parsing, metadata extraction, or raw document storage.
