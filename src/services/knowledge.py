@@ -2216,17 +2216,18 @@ class QdrantBackend:
         from qdrant_client.models import (  # type: ignore
             FieldCondition,
             Filter,
-            IsNullCondition,
+            IsEmptyCondition,
             MatchValue,
             PayloadField,
         )
 
         cname = self._qdrant_collection_name(scope)
         # status = "active" OR status field absent (backward compat for pre-orchestrator chunks)
+        # IsEmptyCondition matches absent/empty fields; IsNullCondition matches only explicit nulls.
         status_filter = Filter(
             should=[
                 FieldCondition(key="status", match=MatchValue(value="active")),
-                IsNullCondition(is_null=PayloadField(key="status")),
+                IsEmptyCondition(is_empty=PayloadField(key="status")),
             ]
         )
         kwargs: dict[str, Any] = {
@@ -2255,7 +2256,7 @@ class QdrantBackend:
             Filter,
             FusionQuery,
             Fusion,
-            IsNullCondition,
+            IsEmptyCondition,
             MatchValue,
             PayloadField,
             Prefetch,
@@ -2269,7 +2270,7 @@ class QdrantBackend:
         status_filter = Filter(
             should=[
                 FieldCondition(key="status", match=MatchValue(value="active")),
-                IsNullCondition(is_null=PayloadField(key="status")),
+                IsEmptyCondition(is_empty=PayloadField(key="status")),
             ]
         )
 
