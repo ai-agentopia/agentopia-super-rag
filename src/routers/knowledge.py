@@ -352,8 +352,12 @@ async def debug_query(
     scope = scope.replace("--", "/")
     svc = get_knowledge_service()
 
+    # Scope presence check: in-memory _scopes is authoritative when populated.
+    # After pod restart, _scopes is empty but Qdrant may have existing data —
+    # fall back to Qdrant collection existence so pre-existing scopes are queryable.
     if svc.get_scope(scope) is None:
-        raise HTTPException(status_code=404, detail=f"Scope '{scope}' not found")
+        if not (svc._qdrant and svc._qdrant.has_collection(scope)):
+            raise HTTPException(status_code=404, detail=f"Scope '{scope}' not found")
 
     results = svc.search(query=q, scopes=[scope], limit=limit)
 
