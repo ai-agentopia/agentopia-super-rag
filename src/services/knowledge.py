@@ -2218,6 +2218,7 @@ class QdrantBackend:
             Filter,
             IsNullCondition,
             MatchValue,
+            PayloadField,
         )
 
         cname = self._qdrant_collection_name(scope)
@@ -2225,7 +2226,7 @@ class QdrantBackend:
         status_filter = Filter(
             should=[
                 FieldCondition(key="status", match=MatchValue(value="active")),
-                IsNullCondition(key="status"),
+                IsNullCondition(is_null=PayloadField(key="status")),
             ]
         )
         kwargs: dict[str, Any] = {
@@ -2256,6 +2257,7 @@ class QdrantBackend:
             Fusion,
             IsNullCondition,
             MatchValue,
+            PayloadField,
             Prefetch,
             SparseVector,
         )
@@ -2267,7 +2269,7 @@ class QdrantBackend:
         status_filter = Filter(
             should=[
                 FieldCondition(key="status", match=MatchValue(value="active")),
-                IsNullCondition(key="status"),
+                IsNullCondition(is_null=PayloadField(key="status")),
             ]
         )
 
