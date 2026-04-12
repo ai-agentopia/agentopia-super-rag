@@ -1704,6 +1704,15 @@ class QdrantBackend:
         except Exception as exc:
             return {"status": "unavailable", "message": str(exc)}
 
+    def has_collection(self, scope: str) -> bool:
+        """Return True if the Qdrant collection for scope exists and has at least one point."""
+        cname = self._qdrant_collection_name(scope)
+        try:
+            info = self._client.get_collection(cname)
+            return (info.points_count or 0) > 0
+        except Exception:
+            return False
+
     def _ensure_collection(self, scope: str) -> None:
         """Create Qdrant collection for scope if it does not exist (#100, #319 hybrid)."""
         cname = self._qdrant_collection_name(scope)
