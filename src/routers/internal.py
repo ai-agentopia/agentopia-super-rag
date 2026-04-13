@@ -74,8 +74,9 @@ async def internal_health() -> dict[str, Any]:
 async def sync_binding(body: BindingSyncRequest) -> dict[str, Any]:
     """Sync a bot's knowledge binding (called by bot-config-api on deploy/update).
 
-    Immediately updates the in-memory cache. No persistence needed —
-    K8s CRD annotations are the durable source of truth.
+    Immediately updates the in-memory cache. No persistence needed here —
+    bot-config-api DB (bot_knowledge_bindings table) is the durable source of
+    truth (#KB-BINDING-V2). Cache is rebuilt from control-plane on startup.
     """
     from services.binding_cache import get_binding_cache
 
