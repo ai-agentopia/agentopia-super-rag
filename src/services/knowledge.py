@@ -840,15 +840,15 @@ class KnowledgeService:
 
         chunk_count = 0
 
+        # Detect prior version BEFORE upsert/storage so we can supersede after commit
+        prior_version: int | None = None
+        if self._doc_store:
+            existing = self._doc_store.get_active(scope, source)
+            if existing:
+                prior_meta = getattr(existing, "metadata", None) or {}
+                prior_version = prior_meta.get("version")
+
         if self._qdrant:
-            # Detect prior version BEFORE upsert so we can supersede after commit
-            prior_version: int | None = None
-            if self._doc_store:
-                existing = self._doc_store.get_active(scope, source)
-                if existing:
-                    # Read prior version from stored metadata
-                    prior_meta = getattr(existing, "metadata", None) or {}
-                    prior_version = prior_meta.get("version")
 
             # Upsert new version chunks (status=active in payload)
             chunk_count = self._qdrant.ingest_chunks_versioned(
@@ -880,6 +880,7 @@ class KnowledgeService:
             chunk_count = len(raw_chunks)
 
         # Update document_records with stable source and version stored in metadata
+        existing_record = None
         if self._doc_store:
             new_record = DocumentRecord(
                 scope=scope,
@@ -897,22 +898,34 @@ class KnowledgeService:
             else:
                 self._doc_store.create(new_record)
 
-        # Update in-memory scope metadata
+        # Update in-memory scope metadata — must maintain document_count and chunk_count
+        # so list_scopes() reflects the actual indexed state.
+        is_replacement = existing_record is not None
+
         if scope not in self._scopes:
             self._scopes[scope] = KnowledgeScope(name=scope)
+        if is_replacement:
+            # Replace: document_count stays the same, chunk_count adjusts
+            old_count = existing_record.chunk_count if existing_record else 0
+            self._scopes[scope].chunk_count += chunk_count - old_count
+        else:
+            # New document: increment both
+            self._scopes[scope].document_count += 1
+            self._scopes[scope].chunk_count += chunk_count
         self._scopes[scope].last_indexed = time.time()
 
         logger.info(
-            "ingest_from_orchestrator: scope=%s document_id=%s version=%d chunks=%d",
+            "ingest_from_orchestrator: scope=%s document_id=%s version=%d chunks=%d doc_count=%d chunk_count=%d",
             scope, doc_id, version, chunk_count,
+            self._scopes[scope].document_count, self._scopes[scope].chunk_count,
         )
 
         # ── Regression check on replacement ──────────────────────────────────
-        # Only triggered when a prior version was superseded (is_replacement).
+        # Only triggered when a prior version was superseded.
         # Runs after commit so retrieval is never blocked.
         # Failures are logged but never propagate — ingest is already complete.
-        is_replacement = prior_version is not None and prior_version != version
-        if is_replacement:
+        version_superseded = prior_version is not None and prior_version != version
+        if version_superseded:
             try:
                 from services.evaluation import check_regression
                 reg_result = check_regression(
