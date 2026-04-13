@@ -13,7 +13,9 @@ Auth:
   Read routes:  X-Internal-Token OR bot bearer (Authorization + X-Bot-Name)
   Internal routes: X-Internal-Token
 
-Binding sync: startup rebuild from K8s, sync webhook, cache-miss fallback, periodic reconcile.
+Binding sync: startup rebuild from bot-config-api control-plane (V2, #KB-BINDING-V2),
+sync webhook, cache-miss fallback to control-plane, periodic reconcile.
+K8s CRD annotations are DEPRECATED as binding source (transitional fallback only).
 """
 
 import asyncio
@@ -66,19 +68,20 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("knowledge-api v%s starting", VERSION)
 
-    # ── Startup: rebuild binding cache from K8s CRD annotations ──────────
+    # ── Startup: rebuild binding cache from control-plane (#KB-BINDING-V2) ──
     from services.binding_cache import get_binding_cache
 
     cache = get_binding_cache()
+    bot_config_api_url = os.getenv("BOT_CONFIG_API_URL", "")
     k8s_enabled = bool(os.getenv("KUBERNETES_SERVICE_HOST") or os.getenv("KUBECONFIG"))
-    if k8s_enabled:
+    if bot_config_api_url or k8s_enabled:
         try:
-            count = cache.rebuild_from_k8s()
+            count = cache.rebuild_from_control_plane()
             logger.info("binding_cache: startup rebuild complete — %d bots", count)
         except Exception:
             logger.warning("binding_cache: startup rebuild failed — cache is empty", exc_info=True)
     else:
-        logger.info("binding_cache: K8s not available, starting with empty cache (local dev)")
+        logger.info("binding_cache: no control-plane or K8s available, starting with empty cache (local dev)")
 
     # ── Evaluation schema migration ───────────────────────────────────────
     database_url = os.getenv("DATABASE_URL", "")
@@ -115,12 +118,12 @@ async def lifespan(app: FastAPI):
     from services.binding_cache import BINDING_RECONCILE_INTERVAL_SECS
     _reconcile_task = None
 
-    if k8s_enabled and BINDING_RECONCILE_INTERVAL_SECS > 0:
+    if (bot_config_api_url or k8s_enabled) and BINDING_RECONCILE_INTERVAL_SECS > 0:
         async def _reconcile_loop():
             while True:
                 await asyncio.sleep(BINDING_RECONCILE_INTERVAL_SECS)
                 try:
-                    count = cache.rebuild_from_k8s()
+                    count = cache.rebuild_from_control_plane()
                     logger.info("binding_cache: periodic reconcile — %d bots", count)
                 except Exception:
                     logger.warning("binding_cache: periodic reconcile failed", exc_info=True)

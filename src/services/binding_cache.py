@@ -1,11 +1,14 @@
-"""Bot-scope binding cache for knowledge-api (#320, Phase 2b).
+"""Bot-scope binding cache for knowledge-api (#320, Phase 2b, V2 #KB-BINDING-V2).
 
-Source of truth: Application CRD annotations (written by bot-config-api).
+Source of truth: bot_knowledge_bindings table in bot-config-api Postgres.
 knowledge-api reads/syncs bindings via:
-  1. Startup rebuild from K8s Application CRDs (full scan on start)
-  2. Sync webhook from bot-config-api (POST /internal/binding-sync on deploy/delete)
-  3. Cache-miss fallback: direct K8s CRD read for unknown bot
-  4. Periodic reconcile: full rebuild every BINDING_RECONCILE_INTERVAL_SECS (default 300s)
+  1. Startup rebuild from bot-config-api control-plane API (GET /api/v1/runtime/knowledge-bindings)
+  2. Sync webhook from bot-config-api (POST /internal/binding-sync on deploy/update/delete)
+  3. Cache-miss fallback: bot-config-api runtime endpoint (GET /api/v1/runtime/bots/{bot}/knowledge-binding)
+  4. Periodic reconcile: full rebuild from control-plane every BINDING_RECONCILE_INTERVAL_SECS (default 300s)
+
+K8s CRD annotation reads are DEPRECATED as of V2. Kept as emergency fallback only.
+Remove K8s fallback in V2.4 cleanup once full migration is confirmed stable.
 
 This module owns the binding cache lifecycle. Hot path (resolve) is O(1) dict lookup.
 """
@@ -23,6 +26,16 @@ BINDING_RECONCILE_INTERVAL_SECS = float(
 )
 K8S_NAMESPACE = os.getenv("K8S_NAMESPACE", "agentopia")
 ARGOCD_NAMESPACE = os.getenv("ARGOCD_NAMESPACE", "argocd")
+
+
+def _bot_config_api_url() -> str:
+    """URL of bot-config-api control-plane (V2 binding authority)."""
+    return os.getenv("BOT_CONFIG_API_URL", "").rstrip("/")
+
+
+def _internal_token() -> str:
+    """Internal token sent as X-Internal-Token to bot-config-api runtime API."""
+    return os.getenv("INTERNAL_API_TOKEN", "")
 
 
 @dataclass
@@ -93,27 +106,28 @@ class BindingCache:
         return self._bindings.get(bot_name)
 
     def resolve_with_fallback(self, bot_name: str) -> BotKnowledgeBinding | None:
-        """Cache-miss fallback: if not in cache, try K8s CRD directly.
+        """Cache-miss fallback: if not in cache, query bot-config-api control-plane.
 
-        On K8s success, populates cache for future hits.
+        V2: Fallback uses DB-backed control-plane API, not K8s CRD.
+        On success, populates cache for future hits.
         """
         binding = self._bindings.get(bot_name)
         if binding:
             return binding
 
-        logger.info("binding_cache: cache miss for bot=%s — querying K8s", bot_name)
+        logger.info("binding_cache: cache miss for bot=%s — querying control-plane", bot_name)
         try:
-            binding = self._fetch_from_k8s_for_bot(bot_name)
+            binding = self._fetch_from_control_plane_for_bot(bot_name)
             if binding:
                 self._bindings[bot_name] = binding
                 logger.info(
-                    "binding_cache: populated from K8s fallback bot=%s scopes=%s",
+                    "binding_cache: populated from control-plane bot=%s scopes=%s",
                     bot_name, binding.knowledge_scopes,
                 )
             return binding
         except Exception as exc:
             logger.warning(
-                "binding_cache: K8s fallback failed for bot=%s: %s", bot_name, exc,
+                "binding_cache: control-plane fallback failed for bot=%s: %s", bot_name, exc,
             )
             return None
 
@@ -131,12 +145,60 @@ class BindingCache:
 
     # ── Reconcile (startup + periodic) ────────────────────────────────────
 
+    def rebuild_from_control_plane(self) -> int:
+        """Full rebuild from bot-config-api DB-backed control-plane API.
+
+        V2 primary rebuild path (replaces rebuild_from_k8s).
+        Called on startup and by periodic reconcile task.
+        Falls back to rebuild_from_k8s() if BOT_CONFIG_API_URL is not set.
+        Returns number of bots with knowledge bindings found.
+        """
+        base = _bot_config_api_url()
+        if not base:
+            logger.warning(
+                "binding_cache: BOT_CONFIG_API_URL not set — falling back to K8s rebuild"
+            )
+            return self.rebuild_from_k8s()
+
+        import urllib.request
+
+        token = _internal_token()
+        headers = {"X-Internal-Token": token} if token else {}
+        req = urllib.request.Request(
+            f"{base}/api/v1/runtime/knowledge-bindings",
+            headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                data = json.loads(resp.read())
+        except Exception as exc:
+            logger.warning(
+                "binding_cache: control-plane bulk rebuild failed: %s — falling back to K8s", exc,
+            )
+            return self.rebuild_from_k8s()
+
+        new_bindings: dict[str, BotKnowledgeBinding] = {}
+        for entry in data.get("bindings", []):
+            bot_name = entry.get("bot_name", "")
+            client_id = entry.get("client_id", "")
+            scopes = entry.get("knowledge_scopes", [])
+            if bot_name and client_id and scopes:
+                new_bindings[bot_name] = BotKnowledgeBinding(
+                    client_id=client_id, knowledge_scopes=scopes,
+                )
+
+        self._bindings = new_bindings
+        self._last_reconcile = time.time()
+        count = len(new_bindings)
+        logger.info("binding_cache: rebuilt from control-plane — %d bots with knowledge", count)
+        return count
+
     def rebuild_from_k8s(self) -> int:
         """Full rebuild from Application CRD annotations.
 
-        Called on startup and by periodic reconcile task.
-        Returns number of bots with knowledge bindings found.
-        Skips gracefully when K8s is not available (local dev).
+        DEPRECATED: Use rebuild_from_control_plane() for V2.
+        Kept as emergency fallback when BOT_CONFIG_API_URL is not configured.
+        Will be removed in V2.4 cleanup.
         """
         try:
             bots = self._list_bot_applications_from_k8s()
@@ -171,10 +233,57 @@ class BindingCache:
 
         self._bindings = new_bindings
         self._last_reconcile = time.time()
-        logger.info("binding_cache: rebuilt from K8s — %d bots with knowledge", count)
+        logger.info(
+            "binding_cache: rebuilt from K8s (transitional fallback) — %d bots with knowledge",
+            count,
+        )
         return count
 
-    # ── K8s helpers ───────────────────────────────────────────────────────
+    # ── Control-plane helpers (V2) ────────────────────────────────────────
+
+    def _fetch_from_control_plane_for_bot(self, bot_name: str) -> BotKnowledgeBinding | None:
+        """Cache-miss fallback: query bot-config-api runtime endpoint.
+
+        V2: replaces _fetch_from_k8s_for_bot as the primary fallback.
+        Falls back to K8s if BOT_CONFIG_API_URL is not set (transitional).
+        """
+        base = _bot_config_api_url()
+        if not base:
+            logger.debug(
+                "binding_cache: BOT_CONFIG_API_URL not set, using K8s fallback for bot=%s", bot_name,
+            )
+            return self._fetch_from_k8s_for_bot(bot_name)
+
+        import urllib.request
+
+        token = _internal_token()
+        headers = {"X-Internal-Token": token} if token else {}
+        req = urllib.request.Request(
+            f"{base}/api/v1/runtime/bots/{bot_name}/knowledge-binding",
+            headers=headers,
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read())
+        except Exception as exc:
+            logger.warning(
+                "binding_cache: control-plane fallback failed for bot=%s: %s — trying K8s",
+                bot_name, exc,
+            )
+            # Transitional: try K8s if control-plane HTTP fails
+            return self._fetch_from_k8s_for_bot(bot_name)
+
+        if not data.get("enabled"):
+            return None
+
+        client_id = data.get("client_id") or ""
+        scopes = data.get("knowledge_scopes") or []
+        if not client_id or not scopes:
+            return None
+
+        return BotKnowledgeBinding(client_id=client_id, knowledge_scopes=scopes)
+
+    # ── K8s helpers (DEPRECATED — transitional fallback only) ─────────────
 
     def _get_k8s_client(self):
         from kubernetes import client as k8s_client, config as k8s_config
