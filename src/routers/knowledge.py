@@ -13,7 +13,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile
 
-from auth.guards import require_internal_auth, require_knowledge_read
+from auth.guards import require_bot_bearer, require_internal_auth, require_knowledge_read
 from models.knowledge import (
     ChunkingStrategy,
     DocumentFormat,
@@ -66,6 +66,46 @@ def _resolve_bot_scopes(bot_name: str) -> list[str]:
 
 
 # ── Read routes ──────────────────────────────────────────────────────────────
+
+
+@read_router.get("/binding")
+async def get_knowledge_binding(
+    bot_name: str = Depends(require_bot_bearer),
+) -> dict[str, Any]:
+    """Runtime binding status for the calling bot (#KB-DECOUPLE).
+
+    Always returns 200 — returns enabled=false when the bot has no KB binding.
+    Used by the gateway knowledge-retrieval plugin to decide at runtime whether
+    to run retrieval, without requiring a pod rollout when binding changes.
+
+    Auth: bot bearer (Authorization: Bearer {relay_token} + X-Bot-Name header).
+    Never raises 403 — unbound bots get enabled=false, not an error.
+    """
+    from services.binding_cache import get_binding_cache
+
+    cache = get_binding_cache()
+    binding = cache.resolve_with_fallback(bot_name)
+
+    if not binding:
+        logger.info("knowledge_binding_check: bot=%s enabled=false (no binding)", bot_name)
+        return {
+            "enabled": False,
+            "client_id": None,
+            "knowledge_scopes": [],
+            "resolved_scopes": [],
+        }
+
+    scopes = binding.resolved_scopes()
+    logger.info(
+        "knowledge_binding_check: bot=%s enabled=true client_id=%s scopes=%s",
+        bot_name, binding.client_id, scopes,
+    )
+    return {
+        "enabled": True,
+        "client_id": binding.client_id,
+        "knowledge_scopes": binding.knowledge_scopes,
+        "resolved_scopes": scopes,
+    }
 
 
 @read_router.get("/scopes")

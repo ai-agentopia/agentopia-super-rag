@@ -1,14 +1,15 @@
-"""BindingCache tests (#320).
+"""BindingCache tests (#320, #KB-BINDING-V2).
 
 Tests:
 1. update() / remove() — direct cache manipulation
 2. resolve() — O(1) cache lookup
-3. resolve_with_fallback() — cache-miss → K8s
-4. rebuild_from_k8s() — full reconcile from Application CRDs
-5. Periodic reconcile interval config
-6. Summary diagnostics
-7. Bot identity contract: rebuild uses labels["agentopia/bot"] (slug), not agent-name
-8. Env scoping: _list_bot_applications_from_k8s uses agentopia/env label selector
+3. resolve_with_fallback() V2 — cache-miss → control-plane (not K8s)
+4. rebuild_from_control_plane() — V2 primary rebuild from bot-config-api
+5. _fetch_from_control_plane_for_bot() — single-bot V2 fallback
+6. rebuild_from_k8s() — DEPRECATED transitional fallback
+7. Summary diagnostics
+8. Bot identity contract: rebuild uses labels["agentopia/bot"] (slug), not agent-name
+9. Env scoping: _list_bot_applications_from_k8s uses agentopia/env label selector
 """
 
 import time
@@ -91,37 +92,37 @@ class TestResolve:
         assert "client-1/code" in scopes
 
     def test_resolve_with_fallback_hit(self, cache):
-        """Cache hit → no K8s call."""
+        """Cache hit → no control-plane call."""
         cache.update("bot-a", "client-1", ["docs"])
-        with patch.object(cache, "_fetch_from_k8s_for_bot") as mock_k8s:
+        with patch.object(cache, "_fetch_from_control_plane_for_bot") as mock_cp:
             b = cache.resolve_with_fallback("bot-a")
             assert b is not None
-            mock_k8s.assert_not_called()
+            mock_cp.assert_not_called()
 
-    def test_resolve_with_fallback_miss_calls_k8s(self, cache):
-        """Cache miss → K8s fallback."""
+    def test_resolve_with_fallback_miss_calls_control_plane(self, cache):
+        """Cache miss → control-plane fallback (V2, not K8s)."""
         mock_binding = BotKnowledgeBinding(client_id="c1", knowledge_scopes=["docs"])
-        with patch.object(cache, "_fetch_from_k8s_for_bot", return_value=mock_binding) as mock_k8s:
+        with patch.object(cache, "_fetch_from_control_plane_for_bot", return_value=mock_binding) as mock_cp:
             b = cache.resolve_with_fallback("unknown-bot")
             assert b is not None
             assert b.client_id == "c1"
-            mock_k8s.assert_called_once_with("unknown-bot")
+            mock_cp.assert_called_once_with("unknown-bot")
 
     def test_resolve_with_fallback_populates_cache(self, cache):
-        """K8s fallback result is cached for future hits."""
+        """Control-plane fallback result is cached for future hits."""
         mock_binding = BotKnowledgeBinding(client_id="c1", knowledge_scopes=["docs"])
-        with patch.object(cache, "_fetch_from_k8s_for_bot", return_value=mock_binding):
+        with patch.object(cache, "_fetch_from_control_plane_for_bot", return_value=mock_binding):
             cache.resolve_with_fallback("new-bot")
 
-        # Second call should hit cache
-        with patch.object(cache, "_fetch_from_k8s_for_bot") as mock_k8s:
+        # Second call should hit cache, no control-plane call
+        with patch.object(cache, "_fetch_from_control_plane_for_bot") as mock_cp:
             b = cache.resolve_with_fallback("new-bot")
             assert b is not None
-            mock_k8s.assert_not_called()
+            mock_cp.assert_not_called()
 
-    def test_resolve_with_fallback_k8s_error_returns_none(self, cache):
-        """K8s error → returns None gracefully."""
-        with patch.object(cache, "_fetch_from_k8s_for_bot", side_effect=Exception("k8s down")):
+    def test_resolve_with_fallback_error_returns_none(self, cache):
+        """Control-plane error → returns None gracefully."""
+        with patch.object(cache, "_fetch_from_control_plane_for_bot", side_effect=Exception("cp down")):
             b = cache.resolve_with_fallback("unknown-bot")
             assert b is None
 
@@ -295,6 +296,197 @@ class TestEnvScopedListSelector:
         selector = call_kwargs.get("label_selector", "")
         assert f"agentopia/env={namespace}" in selector, \
             f"Expected agentopia/env={namespace} in selector, got: {selector}"
+
+
+# ── V2: Control-plane rebuild (#KB-BINDING-V2) ────────────────────────────────
+
+
+class TestRebuildFromControlPlane:
+    """rebuild_from_control_plane() — V2 primary startup/reconcile path."""
+
+    def test_rebuilds_from_control_plane_response(self, cache):
+        """Parses bot-config-api bulk binding response into cache."""
+        import json
+        from io import BytesIO
+        from unittest.mock import patch, MagicMock
+
+        payload = json.dumps({
+            "bindings": [
+                {"bot_name": "bot-alpha", "client_id": "acme", "knowledge_scopes": ["api-docs"]},
+                {"bot_name": "bot-beta", "client_id": "acme", "knowledge_scopes": ["onboarding", "handbook"]},
+            ]
+        }).encode()
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = payload
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                count = cache.rebuild_from_control_plane()
+
+        assert count == 2
+        assert cache.resolve("bot-alpha") is not None
+        b = cache.resolve("bot-beta")
+        assert b.knowledge_scopes == ["onboarding", "handbook"]
+        assert b.client_id == "acme"
+
+    def test_replaces_existing_bindings(self, cache):
+        """Full rebuild replaces stale cache."""
+        cache.update("stale-bot", "old", ["old"])
+
+        import json
+        from unittest.mock import MagicMock
+
+        payload = json.dumps({"bindings": [
+            {"bot_name": "new-bot", "client_id": "c1", "knowledge_scopes": ["fresh"]},
+        ]}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = payload
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                cache.rebuild_from_control_plane()
+
+        assert cache.resolve("stale-bot") is None
+        assert cache.resolve("new-bot") is not None
+
+    def test_falls_back_to_k8s_when_url_not_set(self, cache):
+        """Falls back to rebuild_from_k8s() when BOT_CONFIG_API_URL not set."""
+        with patch("services.binding_cache._bot_config_api_url", return_value=""):
+            with patch.object(cache, "rebuild_from_k8s", return_value=3) as mock_k8s:
+                count = cache.rebuild_from_control_plane()
+        assert count == 3
+        mock_k8s.assert_called_once()
+
+    def test_falls_back_to_k8s_on_http_error(self, cache):
+        """Falls back to K8s if control-plane request fails."""
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", side_effect=Exception("HTTP error")):
+                with patch.object(cache, "rebuild_from_k8s", return_value=2) as mock_k8s:
+                    count = cache.rebuild_from_control_plane()
+        assert count == 2
+        mock_k8s.assert_called_once()
+
+    def test_skips_entries_missing_required_fields(self, cache):
+        """Entries without bot_name, client_id, or scopes are skipped."""
+        import json
+        from unittest.mock import MagicMock
+
+        payload = json.dumps({"bindings": [
+            {"bot_name": "", "client_id": "c1", "knowledge_scopes": ["s"]},       # no bot_name
+            {"bot_name": "bot-x", "client_id": "", "knowledge_scopes": ["s"]},     # no client_id
+            {"bot_name": "bot-y", "client_id": "c1", "knowledge_scopes": []},      # empty scopes
+            {"bot_name": "bot-z", "client_id": "c1", "knowledge_scopes": ["ok"]},  # valid
+        ]}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = payload
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                count = cache.rebuild_from_control_plane()
+
+        assert count == 1
+        assert cache.resolve("bot-z") is not None
+
+    def test_updates_last_reconcile(self, cache):
+        before = cache._last_reconcile
+        import json
+        from unittest.mock import MagicMock
+
+        payload = json.dumps({"bindings": []}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = payload
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                cache.rebuild_from_control_plane()
+
+        assert cache._last_reconcile > before
+
+
+class TestFetchFromControlPlaneForBot:
+    """_fetch_from_control_plane_for_bot() — V2 single-bot cache-miss fallback."""
+
+    def test_returns_binding_for_enabled_bot(self, cache):
+        import json
+        from unittest.mock import MagicMock
+
+        payload = json.dumps({
+            "enabled": True,
+            "client_id": "acme",
+            "knowledge_scopes": ["api-docs", "onboarding"],
+        }).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = payload
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                b = cache._fetch_from_control_plane_for_bot("bot-anna")
+
+        assert b is not None
+        assert b.client_id == "acme"
+        assert "api-docs" in b.knowledge_scopes
+
+    def test_returns_none_for_disabled_bot(self, cache):
+        import json
+        from unittest.mock import MagicMock
+
+        payload = json.dumps({"enabled": False}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = payload
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                b = cache._fetch_from_control_plane_for_bot("bot-unbound")
+
+        assert b is None
+
+    def test_falls_back_to_k8s_when_url_not_set(self, cache):
+        """No BOT_CONFIG_API_URL → K8s fallback."""
+        mock_binding = BotKnowledgeBinding(client_id="c1", knowledge_scopes=["s"])
+        with patch("services.binding_cache._bot_config_api_url", return_value=""):
+            with patch.object(cache, "_fetch_from_k8s_for_bot", return_value=mock_binding) as mock_k8s:
+                b = cache._fetch_from_control_plane_for_bot("bot-x")
+        assert b is not None
+        mock_k8s.assert_called_once_with("bot-x")
+
+    def test_falls_back_to_k8s_on_http_error(self, cache):
+        """HTTP failure → K8s transitional fallback."""
+        mock_binding = BotKnowledgeBinding(client_id="c1", knowledge_scopes=["s"])
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", side_effect=Exception("connection refused")):
+                with patch.object(cache, "_fetch_from_k8s_for_bot", return_value=mock_binding) as mock_k8s:
+                    b = cache._fetch_from_control_plane_for_bot("bot-x")
+        assert b is not None
+        mock_k8s.assert_called_once_with("bot-x")
+
+    def test_returns_none_when_client_id_missing(self, cache):
+        import json
+        from unittest.mock import MagicMock
+
+        payload = json.dumps({"enabled": True, "client_id": "", "knowledge_scopes": ["s"]}).encode()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = payload
+        mock_resp.__enter__ = lambda s: s
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("services.binding_cache._bot_config_api_url", return_value="http://bot-config-api"):
+            with patch("urllib.request.urlopen", return_value=mock_resp):
+                b = cache._fetch_from_control_plane_for_bot("bot-bad")
+
+        assert b is None
 
 
 # ── Summary diagnostics ───────────────────────────────────────────────────────
