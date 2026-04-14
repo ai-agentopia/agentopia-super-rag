@@ -58,6 +58,38 @@ async def internal_health() -> dict[str, Any]:
         result["qdrant"] = f"error: {exc}"
         result["status"] = "degraded"
 
+    # DocumentStore (Postgres) health — critical for document listing and dedup
+    try:
+        svc = get_knowledge_service()
+        doc_store = svc._doc_store
+        if doc_store is None:
+            # Should be unreachable if DATABASE_URL was set and init succeeded
+            result["document_store"] = {
+                "status": "unavailable",
+                "backend": "none",
+                "reason": "DocumentStore not initialized — document listing and dedup will be broken",
+            }
+            result["status"] = "degraded"
+        else:
+            backend = type(doc_store).__name__
+            # Postgres: do a cheap read to confirm connectivity
+            if backend == "PostgresDocumentStore":
+                try:
+                    doc_store.list_active("__health_check__")  # empty scope lookup
+                    result["document_store"] = {"status": "ok", "backend": "postgres"}
+                except Exception as exc:
+                    result["document_store"] = {
+                        "status": "degraded",
+                        "backend": "postgres",
+                        "error": f"{type(exc).__name__}: {exc}",
+                    }
+                    result["status"] = "degraded"
+            else:
+                result["document_store"] = {"status": "ok", "backend": "in-memory"}
+    except Exception as exc:
+        result["document_store"] = {"status": "error", "error": str(exc)}
+        result["status"] = "degraded"
+
     # Proxy mode config
     result["proxy_mode"] = {
         "knowledge_api_url": os.getenv("KNOWLEDGE_API_URL", ""),
