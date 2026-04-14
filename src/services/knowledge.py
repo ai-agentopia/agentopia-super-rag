@@ -2357,8 +2357,20 @@ def get_knowledge_service() -> KnowledgeService:
                     exc,
                 )
         # Document lifecycle store (#303)
+        # If Postgres init fails (auth, connectivity), log LOUDLY and leave
+        # _doc_store=None so /internal/health reports degraded — do not let a
+        # silent exception half-initialize the singleton.
         from services.document_store import get_document_store
-        _knowledge._doc_store = get_document_store()
-        store_type = type(_knowledge._doc_store).__name__
-        logger.info("KnowledgeService: document store = %s", store_type)
+        try:
+            _knowledge._doc_store = get_document_store()
+            store_type = type(_knowledge._doc_store).__name__
+            logger.info("KnowledgeService: document store = %s", store_type)
+        except Exception as exc:
+            logger.error(
+                "KnowledgeService: DocumentStore init FAILED (%s: %s) — "
+                "service will run degraded: document listing and dedup will not work. "
+                "Check DATABASE_URL, agentopia-postgres-auth secret, and Postgres availability.",
+                type(exc).__name__, exc,
+            )
+            _knowledge._doc_store = None
     return _knowledge
