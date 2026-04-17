@@ -1,0 +1,56 @@
+{
+  "_meta": {
+    "description": "Production retrieval quality baseline — captured before RAG initiative implementation begins. Floor: no phase may land below these values.",
+    "initiative": "RAG and Agentic System Architecture Initiative",
+    "initiative_docs": "https://github.com/ai-agentopia/docs/tree/main/rag",
+    "captured_at": "2026-04-17",
+    "source": "agentopia-super-rag/docs/evaluation.md — Current Production Baseline section",
+    "note": "Values sourced from documented production baseline. Live eval requires access to Qdrant at server36 cluster. Re-run to verify freshness before Phase 3 begins.",
+    "configuration": {
+      "retrieval_mode": "dense-only",
+      "embedding_model": "text-embedding-3-small",
+      "embedding_dimensions": 1536,
+      "top_k": 5,
+      "index_type": "HNSW",
+      "vector_store": "Qdrant"
+    },
+    "eval_runner": {
+      "command": "PYTHONPATH=src python evaluation/phase1b_baseline.py --scope test/platform-docs",
+      "dataset": "evaluation/datasets/phase1b_labeled_seed.json",
+      "scope": "test/platform-docs",
+      "reproducible": true,
+      "requires": "Qdrant accessible at configured QDRANT_URL (server36 cluster)"
+    }
+  },
+  "metrics": {
+    "nDCG_at_5": {
+      "value": 0.925,
+      "description": "Normalized Discounted Cumulative Gain at rank 5 — quality of ranked result ordering",
+      "floor": 0.90,
+      "aspirational_target": 0.95
+    },
+    "MRR": {
+      "value": 0.96,
+      "description": "Mean Reciprocal Rank — how quickly the first relevant result appears"
+    },
+    "P_at_5": {
+      "value": 0.84,
+      "description": "Precision at rank 5 — fraction of top-5 results that are relevant"
+    },
+    "R_at_5": {
+      "value": 1.0,
+      "description": "Recall at rank 5 — all relevant docs found within top-5"
+    }
+  },
+  "floors": {
+    "nDCG_at_5_hard_floor": 0.90,
+    "note": "P3.6 gate: nDCG@5 >= 0.90 on pilot scope. P4 exit gate: nDCG@5 >= 0.925 across all scopes."
+  },
+  "w_series_outcomes": {
+    "W1_markdown_chunking": "accepted — opt-in",
+    "W2_hybrid_BM25_dense": "frozen — insufficient improvement on pilot corpus; reopen requires >= 3% nDCG@5 delta on post-Pathway corpus (P5 gate)",
+    "W3a": "not approved",
+    "W3b": "not approved",
+    "W4_reranking_gpt4o_mini_listwise": "rejected — nDCG@5 regression of -0.1238"
+  }
+}
