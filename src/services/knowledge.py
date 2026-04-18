@@ -457,25 +457,45 @@ def _extract_heading_level(text: str) -> int:
 
 
 def build_citations(results: list[dict[str, Any]]) -> list[SearchResult]:
-    """Build search results with citations from Qdrant payload (#102, ADR-011)."""
+    """Build search results with citations from Qdrant payload (#102, ADR-011).
+
+    Supports two payload schemas:
+
+    Legacy (knowledge-api orchestrator ingest):
+      payload.metadata.source, payload.metadata.section, etc.
+      All citation fields nested inside a "metadata" dict.
+
+    Pathway (agentopia-rag-platform flat ingest):
+      payload.document_id, payload.section, payload.chunk_index, etc.
+      All fields at the top level, no "metadata" wrapper.
+      "document_id" maps to citation "source".
+
+    When payload.metadata is present and non-empty, it is preferred (legacy).
+    Otherwise, top-level payload fields are used (Pathway fallback).
+    """
     search_results = []
     for r in results:
         payload = r.get("payload", {})
         metadata = payload.get("metadata", {})
+        # Pathway flat-payload fallback: when metadata dict is absent or empty,
+        # read citation fields from top-level payload keys.
+        # "document_id" (Pathway) maps to "source" (knowledge-api citation).
+        m = metadata if metadata else payload
+        source = m.get("source", "") or m.get("document_id", "")
         search_results.append(
             SearchResult(
                 text=payload.get("text", r.get("text", "")),
                 score=r.get("score", 0.0),
-                scope=metadata.get("scope", ""),
+                scope=m.get("scope", ""),
                 citation=Citation(
-                    source=metadata.get("source", ""),
-                    section=metadata.get("section", ""),
-                    section_path=metadata.get("section_path", ""),
-                    page=metadata.get("page"),
-                    chunk_index=metadata.get("chunk_index", 0),
+                    source=source,
+                    section=m.get("section", ""),
+                    section_path=m.get("section_path", ""),
+                    page=m.get("page"),
+                    chunk_index=m.get("chunk_index", 0),
                     score=r.get("score", 0.0),
-                    ingested_at=metadata.get("ingested_at", 0.0),
-                    document_hash=metadata.get("document_hash", ""),
+                    ingested_at=m.get("ingested_at", 0.0),
+                    document_hash=m.get("document_hash", ""),
                 ),
             )
         )
