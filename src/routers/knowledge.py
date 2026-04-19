@@ -242,9 +242,12 @@ async def list_documents(
         if scope not in allowed:
             raise HTTPException(status_code=403, detail="scope not in bot subscriptions")
 
+    # Post-Pathway, knowledge-api's in-memory `_scopes` registry is only
+    # populated by the legacy direct-ingest path — scopes managed by Pathway
+    # never appear there even though they hold real chunks in Qdrant. The
+    # service layer now aggregates documents from DocumentStore + Qdrant,
+    # so an "unknown" scope simply resolves to an empty list.
     svc = get_knowledge_service()
-    if svc.get_scope(scope) is None:
-        raise HTTPException(status_code=404, detail=f"Scope '{scope}' not found")
     docs = svc.list_documents(scope)
     return {"scope": scope, "documents": docs}
 

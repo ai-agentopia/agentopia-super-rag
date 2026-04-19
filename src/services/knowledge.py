@@ -1555,15 +1555,23 @@ class KnowledgeService:
         return removed
 
     def list_documents(self, scope: str) -> list[dict]:
-        """List documents in a scope (#106, #303).
+        """List documents in a scope (#106, #303, P4.5).
 
-        Uses DocumentStore if available (durable, includes provenance).
-        Falls back to in-memory chunk scan.
+        Resolution order:
+          1. DocumentStore (Postgres) — durable, includes provenance.
+          2. Qdrant (post-Pathway) — scopes indexed by Pathway are not
+             written to DocumentStore, so aggregate directly from points.
+          3. In-memory chunk scan — unit-test / no-qdrant fallback.
+
+        The final list is the union of DocumentStore records and Qdrant
+        `document_id`s, so legacy scopes and Pathway-managed scopes both
+        render correctly.
         """
+        seen: dict[str, dict] = {}
+
         if self._doc_store:
-            records = self._doc_store.list_active(scope)
-            return [
-                {
+            for r in self._doc_store.list_active(scope):
+                seen[r.source] = {
                     "source": r.source,
                     "chunk_count": r.chunk_count,
                     "scope": r.scope,
@@ -1571,9 +1579,31 @@ class KnowledgeService:
                     "ingested_at": r.ingested_at,
                     "format": r.format.value,
                 }
-                for r in records
-            ]
-        # Fallback: in-memory chunk scan
+
+        if self._qdrant:
+            try:
+                for row in self._qdrant.list_documents(scope):
+                    src = row.get("source") or ""
+                    if not src or src in seen:
+                        continue
+                    seen[src] = {
+                        "source": src,
+                        "chunk_count": row.get("chunk_count", 0),
+                        "scope": scope,
+                        "document_hash": row.get("document_hash", ""),
+                        "ingested_at": row.get("ingested_at", 0.0),
+                        "format": row.get("format", "text"),
+                    }
+            except Exception as exc:
+                logger.warning(
+                    "list_documents: Qdrant enumerate failed scope=%s err=%s",
+                    scope, exc,
+                )
+
+        if seen:
+            return sorted(seen.values(), key=lambda d: d["source"])
+
+        # In-memory fallback (unit tests / local dev without Qdrant).
         chunks = self._chunks.get(scope, [])
         sources: dict[str, int] = {}
         for chunk in chunks:
@@ -1745,6 +1775,93 @@ class QdrantBackend:
             return (info.points_count or 0) > 0
         except Exception:
             return False
+
+    _EXT_TO_FORMAT = {
+        "pdf": "pdf",
+        "docx": "text",
+        "html": "html",
+        "htm": "html",
+        "md": "markdown",
+        "markdown": "markdown",
+        "txt": "text",
+    }
+
+    @classmethod
+    def _infer_format_from_source(cls, source: str) -> str:
+        if "." not in source:
+            return "text"
+        ext = source.rsplit(".", 1)[-1].lower()
+        return cls._EXT_TO_FORMAT.get(ext, "text")
+
+    def list_documents(self, scope: str) -> list[dict]:
+        """Aggregate unique document_id values from the scope's Qdrant collection.
+
+        Returns one row per distinct `document_id` with the latest metadata
+        (chunk_count, document_hash, ingested_at, format). This is the
+        authoritative source for Pathway-indexed scopes, which do not
+        maintain entries in DocumentStore.
+
+        Scans the collection with a scroll cursor. If the collection is
+        missing, returns an empty list (callers treat that as "no
+        documents", which matches operator intent).
+        """
+        cname = self._qdrant_collection_name(scope)
+        try:
+            self._client.get_collection(cname)
+        except Exception:
+            return []
+
+        aggregates: dict[str, dict] = {}
+        offset = None
+        # Cap the scan to keep the route latency bounded on very large scopes.
+        MAX_POINTS = 50_000
+        scanned = 0
+        while scanned < MAX_POINTS:
+            kwargs: dict = {
+                "collection_name": cname,
+                "limit": 256,
+                "with_payload": True,
+                "with_vectors": False,
+            }
+            if offset is not None:
+                kwargs["offset"] = offset
+            points, next_offset = self._client.scroll(**kwargs)
+            for pt in points:
+                payload = pt.payload or {}
+                # Canonical identity for a Pathway document = `document_id`;
+                # legacy direct-ingest sometimes only has `metadata.source`.
+                source = (
+                    payload.get("document_id")
+                    or (payload.get("metadata") or {}).get("source")
+                    or ""
+                )
+                if not source:
+                    continue
+                row = aggregates.get(source)
+                if row is None:
+                    row = {
+                        "source": source,
+                        "chunk_count": 0,
+                        "document_hash": payload.get("document_hash")
+                        or (payload.get("metadata") or {}).get("document_hash")
+                        or "",
+                        "ingested_at": payload.get("ingested_at")
+                        or (payload.get("metadata") or {}).get("ingested_at")
+                        or 0.0,
+                        "format": self._infer_format_from_source(source),
+                    }
+                    aggregates[source] = row
+                row["chunk_count"] += 1
+                ia = payload.get("ingested_at") or (
+                    payload.get("metadata") or {}
+                ).get("ingested_at")
+                if ia and ia > (row["ingested_at"] or 0):
+                    row["ingested_at"] = ia
+            scanned += len(points)
+            if next_offset is None:
+                break
+            offset = next_offset
+        return list(aggregates.values())
 
     def _ensure_collection(self, scope: str) -> None:
         """Create Qdrant collection for scope if it does not exist (#100, #319 hybrid)."""
