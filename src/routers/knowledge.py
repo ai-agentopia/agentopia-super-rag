@@ -258,70 +258,39 @@ async def webhook_ingest() -> dict[str, Any]:
     raise HTTPException(status_code=410, detail="Webhook ingestion is retired.")
 
 
-@write_router.post("/{scope}/ingest", status_code=201)
-async def ingest_file(
-    scope: str,
-    file: UploadFile = File(...),
-) -> dict[str, Any]:
-    scope = scope.replace("--", "/")
-    svc = get_knowledge_service()
-    raw_bytes = await file.read()
-    filename = file.filename or "upload"
+@write_router.post("/{scope}/ingest", status_code=410)
+async def ingest_file_retired(scope: str) -> dict[str, Any]:
+    """Direct-to-Qdrant file ingest is retired (P4.5).
 
-    import os as _os
-    ext = _os.path.splitext(filename)[1].lower()
-    fmt = _EXT_FORMAT.get(ext, DocumentFormat.TEXT)
-
-    if fmt == DocumentFormat.PDF:
-        try:
-            content = parse_pdf(raw_bytes)
-        except Exception as exc:
-            raise HTTPException(status_code=422, detail=f"Failed to parse PDF: {exc}")
-    elif fmt == DocumentFormat.HTML:
-        try:
-            content = parse_html(raw_bytes)
-        except Exception as exc:
-            raise HTTPException(status_code=422, detail=f"Failed to parse HTML: {exc}")
-    else:
-        content = raw_bytes.decode("utf-8", errors="replace")
-
-    if not content.strip():
-        raise HTTPException(status_code=422, detail="File contains no extractable text")
-
-    result = svc.ingest(scope=scope, content=content, source=filename, format=fmt)
-    return {
-        "status": "ingested",
-        "scope": scope,
-        "source": filename,
-        "format": fmt.value,
-        "chunks_created": result.chunks_created,
-        "chunks_skipped": result.chunks_skipped,
-        "document_hash": result.document_hash,
-        "ingested_at": result.ingested_at,
-    }
-
-
-@write_router.post("/{scope}/ingest-document", response_model=OrchestratorIngestResponse, status_code=201)
-async def ingest_document_from_orchestrator(
-    scope: str,
-    body: OrchestratorIngestRequest,
-) -> OrchestratorIngestResponse:
-    """Ingest pre-parsed document text from agentopia-knowledge-ingest Orchestrator.
-
-    Called after normalization and extraction complete upstream.
-    Accepts plain text + structured metadata; handles chunking and embedding here.
-    Tags every chunk with document_id, version, and status=active in Qdrant payload.
-    Supersedes prior-version chunks for the same document_id in the same scope.
-
-    Idempotent: if (document_id, version) already indexed as active, returns without re-embedding.
+    Pathway is now the single ingest publisher. Operator uploads must use
+    the async path:
+      POST /api/v1/knowledge/{scope}/ingest on bot-config-api, which stages
+      the file in S3 for Pathway pickup and returns 202 Accepted.
     """
-    scope = scope.replace("--", "/")
-    if not body.text.strip():
-        raise HTTPException(status_code=422, detail="text field is empty after normalization")
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Direct-to-Qdrant ingestion is retired. Use bot-config-api "
+            "POST /api/v1/knowledge/{scope}/ingest — it stages uploads in S3 "
+            "for the Pathway pipeline to pick up asynchronously."
+        ),
+    )
 
-    svc = get_knowledge_service()
-    result = svc.ingest_from_orchestrator(scope=scope, request=body)
-    return result
+
+@write_router.post("/{scope}/ingest-document", status_code=410)
+async def ingest_document_retired(scope: str) -> dict[str, Any]:
+    """Orchestrator direct-ingest is retired (P4.5).
+
+    The agentopia-knowledge-ingest orchestrator was fully decommissioned.
+    No caller remains. All ingestion flows through S3 → Pathway → Qdrant.
+    """
+    raise HTTPException(
+        status_code=410,
+        detail=(
+            "Orchestrator direct-ingest is retired. agentopia-knowledge-ingest "
+            "was decommissioned; all ingest flows through S3 → Pathway → Qdrant."
+        ),
+    )
 
 
 @write_router.post("/{scope}/reindex")

@@ -267,16 +267,17 @@ class TestStaleDetectionAndReindex:
 
     def test_reindex_api_endpoint(self):
         """POST /api/v1/knowledge/{scope}/reindex returns reindex_triggered."""
-        from io import BytesIO
         from fastapi.testclient import TestClient
         from main import app
+        from services.knowledge import get_knowledge_service
+        from models.knowledge import DocumentFormat
 
+        # Seed via service layer (POST /ingest retired in P4.5 — use svc directly).
+        get_knowledge_service().ingest(
+            scope="ri-api-test", content="A" * 100, source="x.txt",
+            format=DocumentFormat.TEXT,
+        )
         with TestClient(app, headers=_auth_headers()) as client:
-            # Create scope via file upload (webhook retired #303)
-            client.post(
-                "/api/v1/knowledge/ri-api-test/ingest",
-                files={"file": ("x.txt", BytesIO(b"A" * 100), "text/plain")},
-            )
             resp = client.post("/api/v1/knowledge/ri-api-test/reindex")
         assert resp.status_code == 200
         assert resp.json()["status"] == "reindex_triggered"
@@ -298,15 +299,16 @@ class TestKnowledgeLifecycleAPIs:
 
     def test_get_scope_endpoint(self):
         """GET /api/v1/knowledge/{scope} returns scope metadata."""
-        from io import BytesIO
         from fastapi.testclient import TestClient
         from main import app
+        from services.knowledge import get_knowledge_service
+        from models.knowledge import DocumentFormat
 
+        get_knowledge_service().ingest(
+            scope="meta-scope", content="B" * 100, source="m.txt",
+            format=DocumentFormat.TEXT,
+        )
         with TestClient(app, headers=_auth_headers()) as client:
-            client.post(
-                "/api/v1/knowledge/meta-scope/ingest",
-                files={"file": ("m.txt", BytesIO(b"B" * 100), "text/plain")},
-            )
             resp = client.get("/api/v1/knowledge/meta-scope")
         assert resp.status_code == 200
         data = resp.json()
@@ -323,19 +325,15 @@ class TestKnowledgeLifecycleAPIs:
 
     def test_list_documents_endpoint(self):
         """GET /api/v1/knowledge/{scope}/documents lists sources."""
-        from io import BytesIO
         from fastapi.testclient import TestClient
         from main import app
+        from services.knowledge import get_knowledge_service
+        from models.knowledge import DocumentFormat
 
+        svc = get_knowledge_service()
+        svc.ingest(scope="docs-scope", content="C" * 100, source="file1.py", format=DocumentFormat.CODE)
+        svc.ingest(scope="docs-scope", content="D" * 100, source="file2.py", format=DocumentFormat.CODE)
         with TestClient(app, headers=_auth_headers()) as client:
-            client.post(
-                "/api/v1/knowledge/docs-scope/ingest",
-                files={"file": ("file1.py", BytesIO(b"C" * 100), "text/x-python")},
-            )
-            client.post(
-                "/api/v1/knowledge/docs-scope/ingest",
-                files={"file": ("file2.py", BytesIO(b"D" * 100), "text/x-python")},
-            )
             resp = client.get("/api/v1/knowledge/docs-scope/documents")
         assert resp.status_code == 200
         data = resp.json()

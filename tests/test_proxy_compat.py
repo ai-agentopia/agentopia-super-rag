@@ -130,35 +130,24 @@ def test_get_scope_404(client):
     assert resp.status_code == 404
 
 
-# ── Ingest schema (201) ───────────────────────────────────────────────────────
+# ── Ingest retired (P4.5) — direct-to-Qdrant is no longer allowed ────────────
 
 
-def test_ingest_response_schema(client):
-    c, svc = client
-    from models.knowledge import IngestResult
-    svc.ingest.return_value = MagicMock(
-        spec=IngestResult,
-        chunks_created=5,
-        chunks_skipped=0,
-        document_hash="sha256abc",
-        ingested_at=1700000000.0,
-    )
+def test_ingest_route_is_retired(client):
+    """POST /{scope}/ingest returns 410 Gone post P4.5.
 
+    All operator uploads must go through bot-config-api's async S3 path.
+    This test locks the deprecation so any accidental re-introduction of
+    the sync direct-ingest route fails loudly.
+    """
+    c, _ = client
     resp = c.post(
         "/api/v1/knowledge/client1--docs/ingest",
         files={"file": ("doc.md", b"# Test\nContent here", "text/markdown")},
         headers=AUTH_HEADER,
     )
-    assert resp.status_code == 201
-    data = resp.json()
-    # Schema must match bot-config-api response
-    assert data["status"] == "ingested"
-    assert "scope" in data
-    assert "source" in data
-    assert "format" in data
-    assert "chunks_created" in data
-    assert "document_hash" in data
-    assert "ingested_at" in data
+    assert resp.status_code == 410
+    assert "retired" in resp.json()["detail"].lower()
 
 
 # ── Binding sync contracts ────────────────────────────────────────────────────
