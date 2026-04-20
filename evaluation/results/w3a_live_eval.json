@@ -1,0 +1,60 @@
+{
+  "evaluation_type": "live_llm",
+  "date": "2026-04-10",
+  "scope": "joblogic-kb/api-docs",
+  "corpus": {
+    "documents": 6,
+    "sources": ["chatbot-architecture.md", "overview.md", "architecture-multiple-bot.md", "a2a-full-design.md", "governed-pr-review-workflow.md", "production-sa-knowledge-base.md"]
+  },
+  "queries": 10,
+  "metric": "nDCG@5 (source-level dedup)",
+  "expansion_model": "openrouter/openai/gpt-4o-mini",
+  "expansion_n": 3,
+  "infrastructure": "llm-proxy relay (agentopia-dev cluster, 3-hop: local→server36→pod)",
+  "baseline": {
+    "ndcg5": 0.9201,
+    "mrr": 0.9000,
+    "avg_latency_ms": 496
+  },
+  "expansion": {
+    "ndcg5": 0.9251,
+    "mrr": 0.9000,
+    "avg_latency_ms": 4614,
+    "p50_latency_ms": 4190,
+    "p95_latency_ms": 7036
+  },
+  "delta": {
+    "ndcg5": 0.0050,
+    "mrr": 0.0000
+  },
+  "latency": {
+    "overhead_ms": 4118,
+    "llm_call_avg_ms": 2151,
+    "retrieval_per_query_ms": 494,
+    "note": "Measured via 3-hop SSH tunnel (local → server36 → cluster). Production pod-to-pod latency would be ~300-800ms LLM + ~150ms retrieval overhead."
+  },
+  "expansion_samples": [
+    {
+      "original": "What are the core services in the Agentopia platform architecture?",
+      "expansions": [
+        "What are the main services included in the architecture of the Agentopia platform?",
+        "Can you list the essential services that make up the architecture of the Agentopia platform?",
+        "Which fundamental services are part of the Agentopia platform's architecture?"
+      ]
+    },
+    {
+      "original": "How does bot provisioning work and how are credentials secured?",
+      "expansions": [
+        "What is the process of bot provisioning and how is credential security maintained?",
+        "Can you explain the functioning of bot provisioning and the methods used to secure credentials?",
+        "In what way does bot provisioning operate, and what measures are taken to protect credentials?"
+      ]
+    }
+  ],
+  "notes": {
+    "baseline_ceiling": "Dense-only baseline already at 0.9201 nDCG@5 — corpus is small (6 docs) and queries are well-aligned to document content. Small corpus leaves little room for expansion to recover missed results.",
+    "latency_caveat": "Measured through SSH tunnel. Real pod-to-pod LLM call: 300-800ms (per architecture docs). Retrieval overhead per expansion query: ~150ms (4 queries × 150ms = 600ms total). Realistic production overhead: ~900-1400ms.",
+    "corpus_size_caveat": "6-document corpus is dominated by dense-only retrieval quality. Expansion benefit is larger on corpora with lexical mismatch or ambiguous queries. Architecture docs corpus has high-precision dense retrieval.",
+    "deployment_bug": "EMBEDDING_API_KEY env var not read by knowledge.py (was OPENROUTER_API_KEY only). Fixed in fix/16-embedding-api-key-fallback. Required for production deployment."
+  }
+}

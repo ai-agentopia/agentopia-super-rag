@@ -1,0 +1,264 @@
+{
+  "sweep_date": "2026-04-10",
+  "controlled_variables": {
+    "scope": "joblogic-kb/api-docs",
+    "n_expansions": 3,
+    "merge": "RRF k=60",
+    "evaluation": "source-level nDCG@5, MRR, 10 queries",
+    "dataset": "w1_real_pilot.json",
+    "embedding_model": "openrouter/openai/text-embedding-3-small",
+    "top_k": 10
+  },
+  "only_variable": "expansion LLM model",
+  "baseline": {
+    "ndcg5": 0.9201,
+    "mrr": 0.9,
+    "avg_latency_ms": 496
+  },
+  "gpt_4o_mini": {
+    "model": "openai/gpt-4o-mini",
+    "ndcg5": 0.9151304820435195,
+    "mrr": 0.9,
+    "avg_lat_ms": 4232.228637597291,
+    "avg_llm_ms": 2236.7596333962865,
+    "p50_ms": 4287.038917012978,
+    "p95_ms": 5531.5888749901205,
+    "per_query": [
+      {
+        "id": "rp-01",
+        "ndcg": 0.9502344167898356,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-02",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-03",
+        "ndcg": 0.6199062332840657,
+        "mrr": 0.5
+      },
+      {
+        "id": "rp-04",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-05",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-06",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-07",
+        "ndcg": 0.9502344167898356,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-08",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-09",
+        "ndcg": 0.6309297535714575,
+        "mrr": 0.5
+      },
+      {
+        "id": "rp-10",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    ]
+  },
+  "gpt_41_mini": {
+    "model": "openai/gpt-4.1-mini",
+    "ndcg5": 0.9250835986855523,
+    "mrr": 0.9,
+    "avg_lat_ms": 3819.9319959967397,
+    "avg_llm_ms": 1663.328012402053,
+    "p50_ms": 3626.631083985558,
+    "p95_ms": 5649.71716699074,
+    "per_query": [
+      {
+        "id": "rp-01",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-02",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-03",
+        "ndcg": 0.66967181649423,
+        "mrr": 0.5
+      },
+      {
+        "id": "rp-04",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-05",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-06",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-07",
+        "ndcg": 0.9502344167898356,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-08",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      {
+        "id": "rp-09",
+        "ndcg": 0.6309297535714575,
+        "mrr": 0.5
+      },
+      {
+        "id": "rp-10",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    ]
+  },
+  "gate_threshold_ndcg5_delta": 0.02,
+  "verdict": "MODEL_CHANGE_NOT_ENOUGH",
+  "per_query": {
+    "rp-01": {
+      "gpt_4o_mini": {
+        "id": "rp-01",
+        "ndcg": 0.9502344167898356,
+        "mrr": 1.0
+      },
+      "gpt_41_mini": {
+        "id": "rp-01",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    },
+    "rp-02": {
+      "gpt_4o_mini": {
+        "id": "rp-02",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "gpt_41_mini": {
+        "id": "rp-02",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    },
+    "rp-03": {
+      "gpt_4o_mini": {
+        "id": "rp-03",
+        "ndcg": 0.6199062332840657,
+        "mrr": 0.5
+      },
+      "gpt_41_mini": {
+        "id": "rp-03",
+        "ndcg": 0.66967181649423,
+        "mrr": 0.5
+      }
+    },
+    "rp-04": {
+      "gpt_4o_mini": {
+        "id": "rp-04",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "gpt_41_mini": {
+        "id": "rp-04",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    },
+    "rp-05": {
+      "gpt_4o_mini": {
+        "id": "rp-05",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "gpt_41_mini": {
+        "id": "rp-05",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    },
+    "rp-06": {
+      "gpt_4o_mini": {
+        "id": "rp-06",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "gpt_41_mini": {
+        "id": "rp-06",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    },
+    "rp-07": {
+      "gpt_4o_mini": {
+        "id": "rp-07",
+        "ndcg": 0.9502344167898356,
+        "mrr": 1.0
+      },
+      "gpt_41_mini": {
+        "id": "rp-07",
+        "ndcg": 0.9502344167898356,
+        "mrr": 1.0
+      }
+    },
+    "rp-08": {
+      "gpt_4o_mini": {
+        "id": "rp-08",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "gpt_41_mini": {
+        "id": "rp-08",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    },
+    "rp-09": {
+      "gpt_4o_mini": {
+        "id": "rp-09",
+        "ndcg": 0.6309297535714575,
+        "mrr": 0.5
+      },
+      "gpt_41_mini": {
+        "id": "rp-09",
+        "ndcg": 0.6309297535714575,
+        "mrr": 0.5
+      }
+    },
+    "rp-10": {
+      "gpt_4o_mini": {
+        "id": "rp-10",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      },
+      "gpt_41_mini": {
+        "id": "rp-10",
+        "ndcg": 1.0,
+        "mrr": 1.0
+      }
+    }
+  }
+}
